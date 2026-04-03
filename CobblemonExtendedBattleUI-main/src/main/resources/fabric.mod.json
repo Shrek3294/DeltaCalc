@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "id": "cobblemonextendedbattleui",
+  "version": "${version}",
+  "name": "Cobblemon Extended Battle UI",
+  "description": "Customizes and enhances the Cobblemon battle UI",
+  "authors": ["sveniik"],
+  "contact": {
+    "homepage": "https://modrinth.com/mod/cobblemon-extended-battle-ui",
+    "sources": "https://github.com/sveniik/CobblemonExtendedBattleUI"
+  },
+  "license": "MIT",
+  "icon": "assets/cobblemonextendedbattleui/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      {
+        "adapter": "kotlin",
+        "value": "com.cobblemonextendedbattleui.CobblemonExtendedBattleUIClient"
+      }
+    ],
+    "main": [
+      {
+        "adapter": "kotlin",
+        "value": "com.cobblemonextendedbattleui.CobblemonExtendedBattleUI"
+      }
+    ],
+    "modmenu": [
+      {
+        "adapter": "kotlin",
+        "value": "com.cobblemonextendedbattleui.ModMenuIntegration"
+      }
+    ]
+  },
+  "mixins": [
+    "cobblemonextendedbattleui.mixins.json"
+  ],
+  "accessWidener": "cobblemonextendedbattleui.accesswidener",
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-language-kotlin": ">=1.12.0",
+    "cobblemon": ">=1.7.0"
+  },
+  "suggests": {
+    "modmenu": "*",
+    "cloth-config": "*"
+  },
+  "custom": {
+    "modmenu": {
+      "update_checker": true
+    }
+  }
+}

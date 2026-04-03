@@ -1,0 +1,14 @@
+.gradle/
+.kotlin/
+build/
+run/
+out/
+.idea/
+__pycache__/
+*.pyc
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db
+Desktop.ini

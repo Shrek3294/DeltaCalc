@@ -1,0 +1,23 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.cobblemonextendedbattleui.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [],
+  "client": [
+    "BattleMessageHandlerMixin",
+    "BattleEndHandlerMixin",
+    "BattleGUIMixin",
+    "BattleMessagePaneMixin",
+    "DeltaClientBattleMessagePaneMixin",
+    "BattleHealthChangeHandlerMixin",
+    "BattleSwitchHandlerMixin",
+    "BattleInitializeHandlerMixin",
+    "BattleOverlayMixin",
+    "MouseScrollMixin",
+    "BattleMoveSelectionMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

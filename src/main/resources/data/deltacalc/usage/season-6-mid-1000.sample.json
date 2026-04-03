@@ -1,0 +1,69 @@
+{
+  "sourceMeta": {
+    "site": "ranked.cobblemondelta.com",
+    "season": "6",
+    "stage": "mid",
+    "elo": "1000",
+    "generatedAt": "2026-03-31T00:00:00Z"
+  },
+  "species": [
+    {
+      "speciesId": "volcarona",
+      "displayName": "Volcarona",
+      "slug": "volcarona",
+      "usageRank": 13,
+      "usagePercent": 16.99,
+      "sampleCount": 5573,
+      "aliases": ["Volcarona"],
+      "moves": [
+        { "id": "quiver-dance", "displayName": "Quiver Dance", "type": "bug", "usagePercent": 98.53, "sampleCount": null },
+        { "id": "fiery-dance", "displayName": "Fiery Dance", "type": "fire", "usagePercent": 73.02, "sampleCount": null },
+        { "id": "bug-buzz", "displayName": "Bug Buzz", "type": "bug", "usagePercent": 54.11, "sampleCount": null },
+        { "id": "giga-drain", "displayName": "Giga Drain", "type": "grass", "usagePercent": 37.54, "sampleCount": null },
+        { "id": "psychic", "displayName": "Psychic", "type": "psychic", "usagePercent": 19.67, "sampleCount": null },
+        { "id": "flamethrower", "displayName": "Flamethrower", "type": "fire", "usagePercent": 9.55, "sampleCount": null }
+      ],
+      "items": [
+        { "id": "heavy-duty-boots", "displayName": "Heavy Duty Boots", "type": "item", "usagePercent": 55.50, "sampleCount": null },
+        { "id": "leftovers", "displayName": "Leftovers", "type": "item", "usagePercent": 25.91, "sampleCount": null },
+        { "id": "life-orb", "displayName": "Life Orb", "type": "item", "usagePercent": 6.82, "sampleCount": null }
+      ],
+      "abilities": [
+        { "id": "flame-body", "displayName": "Flame Body", "type": "ability", "usagePercent": 82.44, "sampleCount": null },
+        { "id": "swarm", "displayName": "Swarm", "type": "ability", "usagePercent": 17.56, "sampleCount": null }
+      ],
+      "spreads": [
+        { "nature": "Timid", "evs": { "hp": 4, "atk": 0, "def": 0, "spa": 252, "spd": 0, "spe": 252 }, "usagePercent": 20.24 },
+        { "nature": "Timid", "evs": { "hp": 0, "atk": 0, "def": 0, "spa": 252, "spd": 4, "spe": 252 }, "usagePercent": 12.90 }
+      ]
+    },
+    {
+      "speciesId": "corviknight",
+      "displayName": "Corviknight",
+      "slug": "corviknight",
+      "usageRank": 1,
+      "usagePercent": 28.06,
+      "sampleCount": 9210,
+      "aliases": ["Corviknight"],
+      "moves": [
+        { "id": "roost", "displayName": "Roost", "type": "flying", "usagePercent": 84.50, "sampleCount": null },
+        { "id": "body-press", "displayName": "Body Press", "type": "fighting", "usagePercent": 62.14, "sampleCount": null },
+        { "id": "defog", "displayName": "Defog", "type": "flying", "usagePercent": 49.82, "sampleCount": null },
+        { "id": "u-turn", "displayName": "U-turn", "type": "bug", "usagePercent": 38.11, "sampleCount": null }
+      ],
+      "items": [
+        { "id": "rocky-helmet", "displayName": "Rocky Helmet", "type": "item", "usagePercent": 72.81, "sampleCount": null },
+        { "id": "leftovers", "displayName": "Leftovers", "type": "item", "usagePercent": 24.04, "sampleCount": null }
+      ],
+      "abilities": [
+        { "id": "pressure", "displayName": "Pressure", "type": "ability", "usagePercent": 67.84, "sampleCount": null },
+        { "id": "unnerve", "displayName": "Unnerve", "type": "ability", "usagePercent": 16.48, "sampleCount": null },
+        { "id": "mirror-armor", "displayName": "Mirror Armor", "type": "ability", "usagePercent": 15.68, "sampleCount": null }
+      ],
+      "spreads": [
+        { "nature": "Impish", "evs": { "hp": 252, "atk": 0, "def": 252, "spa": 0, "spd": 4, "spe": 0 }, "usagePercent": 27.19 },
+        { "nature": "Impish", "evs": { "hp": 248, "atk": 0, "def": 252, "spa": 0, "spd": 8, "spe": 0 }, "usagePercent": 7.56 }
+      ]
+    }
+  ]
+}
