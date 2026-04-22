@@ -149,10 +149,20 @@ object BattleStateFacade {
 
     private fun canonicalSpeciesKey(baseSpeciesId: String?, formName: String?): String? {
         if (baseSpeciesId.isNullOrBlank()) return null
+        val isDeltaNamespaced = baseSpeciesId.startsWith("delta:", ignoreCase = true)
         val normalizedBase = normalizeFormToken(baseSpeciesId)
         val normalizedForm = normalizeFormToken(formName)
-        if (normalizedForm.isBlank()) return baseSpeciesId
-        val trimmedForm = normalizedForm.removePrefix(normalizedBase).trim('-')
+        val effectiveForm = if (
+            isDeltaNamespaced &&
+            !normalizedBase.endsWith("-delta") &&
+            !normalizedForm.contains("delta")
+        ) {
+            if (normalizedForm.isBlank()) "delta" else "$normalizedForm-delta"
+        } else {
+            normalizedForm
+        }
+        if (effectiveForm.isBlank()) return baseSpeciesId
+        val trimmedForm = effectiveForm.removePrefix(normalizedBase).trim('-')
         return if (trimmedForm.isBlank()) baseSpeciesId else "$baseSpeciesId-$trimmedForm"
     }
 

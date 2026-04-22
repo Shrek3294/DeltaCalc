@@ -7,14 +7,18 @@ import com.cobblemon.mod.common.client.battle.ClientBattlePokemon
 import com.cobblemon.mod.common.pokemon.FormData
 import com.cobblemon.mod.common.pokemon.Pokemon
 import com.cobblemonextendedbattleui.BattleStateTracker
+import com.cobblemonextendedbattleui.CobblemonExtendedBattleUI
 import com.cobblemonextendedbattleui.battle.state.FormTracker
 import com.cobblemonextendedbattleui.pokemon.stats.StatCalculator
 import com.cobblemonextendedbattleui.tracking.TrackedBattleTruth
 import com.cobblemonextendedbattleui.tracking.TrackedBaseStats
 import com.cobblemonextendedbattleui.tracking.TrackedPokemonTruth
 import net.minecraft.util.Identifier
+import java.util.concurrent.ConcurrentHashMap
 
 object CalcBattleSnapshotFactory {
+    private val loggedTypeMismatches = ConcurrentHashMap.newKeySet<String>()
+
     fun fromTruth(truth: TrackedBattleTruth, battleDatabase: BattleDatabase): CalcBattleSnapshot {
         val playerPartyPokemon = truth.playerActive?.uuid?.let { CobblemonClient.storage.party.findByUUID(it) }
         val playerBattlePokemon = truth.playerActive?.uuid?.let(::findActiveBattlePokemon)
@@ -58,9 +62,26 @@ object CalcBattleSnapshotFactory {
                 spe = it.speed
             )
         }
-        val typeNames = formTypeNames.ifEmpty {
-            resolveTypeNames(uuid, battlePokemon, partyPokemon, speciesId, formName)
-        }.ifEmpty { speciesEntry?.typeNames ?: emptyList() }
+        val runtimeTypes = resolveRuntimeOverrideTypes(uuid)
+        val dbTypes = speciesEntry?.typeNames.orEmpty()
+        val liveFormTypes = formTypeNames.ifEmpty {
+            resolveFormTypes(battlePokemon, partyPokemon, speciesId, formName)
+        }
+        if (dbTypes.isNotEmpty() && liveFormTypes.isNotEmpty() && !typesMatch(dbTypes, liveFormTypes)) {
+            val mismatchKey = speciesEntry?.speciesKey ?: speciesId ?: displayName
+            if (loggedTypeMismatches.add(mismatchKey)) {
+                CobblemonExtendedBattleUI.LOGGER.info(
+                    "DeltaCalc type override for {}: mod form reports {} but database says {} — using database",
+                    mismatchKey, liveFormTypes, dbTypes
+                )
+            }
+        }
+        val typeNames = when {
+            runtimeTypes.isNotEmpty() -> runtimeTypes
+            dbTypes.isNotEmpty() -> dbTypes
+            liveFormTypes.isNotEmpty() -> liveFormTypes
+            else -> emptyList()
+        }
         val teraType = BattleStateTracker.getTeraType(uuid)
         val itemName = resolveKnownItem(uuid, partyPokemon, revealedItem)
         val abilityName = if (isPlayerSide) {
@@ -97,7 +118,8 @@ object CalcBattleSnapshotFactory {
             moveList = resolvedMoves,
             baseStats = baseStats,
             actualStats = actualStats,
-            canEvolve = StatCalculator.canPokemonEvolve(resolveSpeciesIdentifier(speciesId))
+            canEvolve = StatCalculator.canPokemonEvolve(resolveSpeciesIdentifier(speciesId)),
+            weightKg = speciesEntry?.weightKg
         )
     }
 
@@ -144,13 +166,7 @@ object CalcBattleSnapshotFactory {
         return form.baseStats.toCalcStats()
     }
 
-    private fun resolveTypeNames(
-        uuid: java.util.UUID,
-        battlePokemon: ClientBattlePokemon?,
-        partyPokemon: Pokemon?,
-        speciesId: String?,
-        formName: String?
-    ): List<String> {
+    private fun resolveRuntimeOverrideTypes(uuid: java.util.UUID): List<String> {
         BattleStateTracker.getTeraType(uuid)?.let { teraType ->
             return listOf(teraType)
         }
@@ -166,6 +182,15 @@ object CalcBattleSnapshotFactory {
             }
         }
 
+        return emptyList()
+    }
+
+    private fun resolveFormTypes(
+        battlePokemon: ClientBattlePokemon?,
+        partyPokemon: Pokemon?,
+        speciesId: String?,
+        formName: String?
+    ): List<String> {
         val form = when {
             partyPokemon != null -> partyPokemon.form
             battlePokemon != null -> resolveBattleForm(battlePokemon, speciesId, formName)
@@ -173,6 +198,11 @@ object CalcBattleSnapshotFactory {
         }
 
         return listOfNotNull(form?.primaryType?.name, form?.secondaryType?.name)
+    }
+
+    private fun typesMatch(a: List<String>, b: List<String>): Boolean {
+        if (a.size != b.size) return false
+        return a.map { it.lowercase() }.toSet() == b.map { it.lowercase() }.toSet()
     }
 
     private fun resolveSpeciesIdentifier(speciesId: String?): Identifier? {

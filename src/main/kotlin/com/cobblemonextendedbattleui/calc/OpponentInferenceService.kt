@@ -119,11 +119,13 @@ class OpponentInferenceService {
     private fun sourceLabel(source: String): String {
         val normalized = normalizeToken(source)
         return when {
+            normalized == "deltacurated" -> "Delta curated"
             normalized == "deltaranked" -> "Delta ranked"
             normalized.startsWith("deltaranked1300") -> "Delta ranked (1300)"
             normalized.startsWith("deltaranked1000") -> "Delta ranked (1000)"
             normalized.startsWith("deltaranked1500") -> "Delta ranked (1500)"
             normalized == "smogonfallback" -> "Smogon fallback"
+            normalized.startsWith("heuristic") -> "Heuristic (base stats)"
             else -> "Default set data"
         }
     }

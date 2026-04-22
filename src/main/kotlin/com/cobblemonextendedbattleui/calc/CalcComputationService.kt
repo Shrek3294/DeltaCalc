@@ -1,5 +1,6 @@
 package com.cobblemonextendedbattleui.calc
 
+import com.cobblemonextendedbattleui.PanelConfig
 import com.cobblemonextendedbattleui.TeamIndicatorUI
 import com.cobblemonextendedbattleui.compat.delta.DeltaBattlePlatformAdapter
 import com.cobblemonextendedbattleui.tracking.BattleStateFacade
@@ -51,6 +52,7 @@ object CalcComputationService {
                 statusText = listOfNotNull(reasonText, warningText).joinToString(" | "),
                 debugText = debugText
             )
+            currentModel?.let { DebugDumper.onComputation(it, damageResult) }
         }
         return currentModel
     }
@@ -58,8 +60,26 @@ object CalcComputationService {
     private fun toRow(estimate: DamageEstimate): CalcMoveRow {
         val damageText = when {
             !estimate.supported -> estimate.warnings.firstOrNull()?.lowercase() ?: "unsupported"
-            estimate.minPercent != null && estimate.maxPercent != null ->
-                "${formatPercent(estimate.minPercent)} - ${formatPercent(estimate.maxPercent)}%"
+            estimate.minPercent != null && estimate.maxPercent != null -> buildString {
+                append(formatPercent(estimate.minPercent))
+                append(" - ")
+                append(formatPercent(estimate.maxPercent))
+                append('%')
+                if (PanelConfig.showMultiHitCount && estimate.maxHits > 1) {
+                    if (estimate.minHits == estimate.maxHits) {
+                        append(" ×").append(estimate.minHits)
+                    } else {
+                        append(" ×").append(estimate.minHits).append('-').append(estimate.maxHits)
+                    }
+                }
+                if (PanelConfig.showCritDamage && estimate.critMinPercent != null && estimate.critMaxPercent != null) {
+                    append(" / crit ")
+                    append(formatPercent(estimate.critMinPercent))
+                    append('-')
+                    append(formatPercent(estimate.critMaxPercent))
+                    append('%')
+                }
+            }
             else -> "best-effort"
         }
         return CalcMoveRow(

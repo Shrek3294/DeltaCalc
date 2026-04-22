@@ -36,6 +36,20 @@ def alias_variants(*values: str | None) -> list[str]:
             if variant and variant not in seen:
                 seen.add(variant)
                 results.append(variant)
+        # Reverse-form variants for Delta species: "Aegislash-Delta" -> "Delta Aegislash", "delta-aegislash", "deltaaegislash"
+        stripped = value.strip()
+        low = stripped.lower()
+        if "delta" in low:
+            tokens = [t for t in low.replace("_", "-").replace(" ", "-").split("-") if t]
+            if "delta" in tokens:
+                non_delta = [t for t in tokens if t != "delta"]
+                if non_delta:
+                    reversed_slug = "delta-" + "-".join(non_delta)
+                    reversed_space = "Delta " + " ".join(t.capitalize() for t in non_delta)
+                    for variant in [reversed_slug, reversed_space, compact(reversed_slug), reversed_space.lower()]:
+                        if variant and variant not in seen:
+                            seen.add(variant)
+                            results.append(variant)
     return results
 
 
@@ -176,8 +190,87 @@ console.log(JSON.stringify(pokedex));
             "aliases": aliases,
             "typeNames": entry.get("types") or [],
             "baseStats": normalize_base_stats(entry.get("baseStats")),
+            "weightKg": entry.get("weightkg") if isinstance(entry.get("weightkg"), (int, float)) else None,
         }
     return species_map
+
+
+def heuristic_spread(base_stats: dict) -> dict:
+    hp = base_stats["hp"]
+    atk = base_stats["atk"]
+    defn = base_stats["def"]
+    spa = base_stats["spa"]
+    spd = base_stats["spd"]
+    spe = base_stats["spe"]
+    is_physical = atk >= spa
+    offensive_score = max(atk, spa) + spe
+    defensive_score = hp + max(defn, spd)
+    if offensive_score >= defensive_score:
+        if is_physical:
+            return {"nature": "Adamant", "evs": {"hp": 4, "atk": 252, "def": 0, "spa": 0, "spd": 0, "spe": 252}, "usagePercent": 0.0}
+        return {"nature": "Modest", "evs": {"hp": 4, "atk": 0, "def": 0, "spa": 252, "spd": 0, "spe": 252}, "usagePercent": 0.0}
+    best_def_physical = defn >= spd
+    evs = {"hp": 252, "atk": 0, "def": 0, "spa": 0, "spd": 0, "spe": 4}
+    if best_def_physical:
+        evs["def"] = 252
+        nature = "Bold"
+    else:
+        evs["spd"] = 252
+        nature = "Calm"
+    return {"nature": nature, "evs": evs, "usagePercent": 0.0}
+
+
+def build_heuristic_set(entry: dict) -> dict:
+    base_stats = entry.get("baseStats")
+    if not base_stats:
+        return {}
+    return {
+        "speciesKey": entry["speciesKey"],
+        "speciesId": entry.get("speciesId") or entry["speciesKey"],
+        "displayName": entry.get("displayName") or entry["speciesKey"],
+        "slug": entry.get("slug") or entry["speciesKey"],
+        "source": "heuristic-baseStats",
+        "usageRank": 0,
+        "usagePercent": 0.0,
+        "sampleCount": 0,
+        "aliases": entry.get("aliases", []),
+        "moves": [],
+        "items": [],
+        "abilities": [],
+        "spreads": [heuristic_spread(base_stats)],
+    }
+
+
+def load_curated_sets(path: Path | None) -> dict[str, dict]:
+    if not path or not path.exists():
+        return {}
+    payload = load_json(path)
+    items = payload.get("deltaRanked") if isinstance(payload, dict) else payload
+    if not isinstance(items, list):
+        items = []
+    curated: dict[str, dict] = {}
+    for raw in items:
+        key_source = raw.get("speciesKey") or raw.get("slug") or raw.get("speciesId") or raw.get("displayName")
+        if not key_source:
+            continue
+        species_key = slugify(key_source)
+        display_name = raw.get("displayName") or species_key
+        curated[species_key] = {
+            "speciesKey": species_key,
+            "speciesId": raw.get("speciesId") or species_key,
+            "displayName": display_name,
+            "slug": raw.get("slug") or species_key,
+            "source": raw.get("source") or "delta-curated",
+            "usageRank": raw.get("usageRank", 0),
+            "usagePercent": raw.get("usagePercent", 0.0),
+            "sampleCount": raw.get("sampleCount", 0),
+            "aliases": alias_variants(display_name, species_key, *(raw.get("aliases") or [])),
+            "moves": normalize_options(raw.get("moves", [])),
+            "items": normalize_options(raw.get("items", [])),
+            "abilities": normalize_options(raw.get("abilities", [])),
+            "spreads": normalize_spreads(raw.get("spreads", [])),
+        }
+    return curated
 
 
 def load_external_species(path: Path | None) -> dict[str, dict]:
@@ -373,7 +466,7 @@ def merge_species_maps(*maps: dict[str, dict]) -> dict[str, dict]:
                 merged[key] = entry
                 continue
             aliases = sorted(set(existing.get("aliases", [])) | set(entry.get("aliases", [])))
-            for field in ["speciesId", "displayName", "slug", "formName", "typeNames", "baseStats"]:
+            for field in ["speciesId", "displayName", "slug", "formName", "typeNames", "baseStats", "weightKg"]:
                 if not existing.get(field) and entry.get(field):
                     existing[field] = entry[field]
             existing["aliases"] = aliases
@@ -388,7 +481,11 @@ def main() -> int:
     parser.add_argument("--report", default="build/reports/deltacalc/battle-database-report.json")
     parser.add_argument("--species-json", default="")
     parser.add_argument("--showdown-pokedex", default="")
+    parser.add_argument("--curated-sets", default="src/main/resources/data/deltacalc/usage/delta-curated-sets.json",
+                        help="Optional JSON of hand-authored Delta sets; highest priority, overrides ranked for the same species.")
     parser.add_argument("--skip-smogon", action="store_true")
+    parser.add_argument("--skip-heuristics", action="store_true",
+                        help="Skip base-stat-derived spreads for species without a ranked or Smogon set.")
     parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
 
@@ -403,11 +500,28 @@ def main() -> int:
     external_species = load_external_species(Path(args.species_json)) if args.species_json else {}
     species_map = merge_species_maps(showdown_species, ranked_species, external_species)
 
+    curated_sets = load_curated_sets(Path(args.curated_sets)) if args.curated_sets else {}
+    merged_delta_sets = dict(ranked_sets)
+    for key, entry in curated_sets.items():
+        merged_delta_sets[key] = entry
+
     smogon_map: dict[str, dict] = {}
     missing_smogon: list[str] = []
     if not args.skip_smogon:
-        candidates = sorted(key for key in species_map.keys() if key not in ranked_sets)
+        candidates = sorted(key for key in species_map.keys() if key not in merged_delta_sets)
         smogon_map, missing_smogon = fetch_smogon_fallback(candidates, args.workers)
+
+    heuristic_count = 0
+    if not args.skip_heuristics:
+        covered = set(merged_delta_sets.keys()) | set(smogon_map.keys())
+        for key, entry in species_map.items():
+            if key in covered:
+                continue
+            heuristic = build_heuristic_set(entry)
+            if not heuristic:
+                continue
+            smogon_map[key] = heuristic
+            heuristic_count += 1
 
     dataset = {
         "sourceMeta": {
@@ -415,10 +529,13 @@ def main() -> int:
             "rankedSources": ",".join(path.name for path in ranked_paths),
             "showdownPokedex": str(showdown_pokedex) if showdown_pokedex else "",
             "externalSpeciesJson": args.species_json,
+            "curatedSetsJson": args.curated_sets if curated_sets else "",
+            "curatedSetCount": str(len(curated_sets)),
+            "heuristicSetCount": str(heuristic_count),
             "smogonEnabled": str(not args.skip_smogon).lower(),
         },
         "species": sorted(species_map.values(), key=lambda entry: entry["speciesKey"]),
-        "deltaRanked": sorted(ranked_sets.values(), key=lambda entry: entry["speciesKey"]),
+        "deltaRanked": sorted(merged_delta_sets.values(), key=lambda entry: entry["speciesKey"]),
         "smogonFallback": sorted(smogon_map.values(), key=lambda entry: entry["speciesKey"]),
     }
 
@@ -433,6 +550,8 @@ def main() -> int:
     report = {
         "speciesCount": len(dataset["species"]),
         "deltaRankedCount": len(dataset["deltaRanked"]),
+        "curatedSetCount": len(curated_sets),
+        "heuristicSetCount": heuristic_count,
         "smogonFallbackCount": len(dataset["smogonFallback"]),
         "missingSmogonFallback": missing_smogon[:1000],
     }
@@ -442,8 +561,10 @@ def main() -> int:
 
     print(
         f"Wrote {len(dataset['species'])} species, "
-        f"{len(dataset['deltaRanked'])} Delta ranked defaults, "
-        f"and {len(dataset['smogonFallback'])} Smogon fallback defaults."
+        f"{len(dataset['deltaRanked'])} Delta ranked/curated defaults "
+        f"({len(curated_sets)} curated), "
+        f"and {len(dataset['smogonFallback'])} fallback defaults "
+        f"({heuristic_count} heuristic)."
     )
     return 0
 

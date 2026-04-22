@@ -147,6 +147,18 @@ object PanelConfig {
     var showBaseCritRate: Boolean = false
         private set
 
+    // Append crit damage range to calc rows ("X-Y% / crit A-B%")
+    var showCritDamage: Boolean = false
+        private set
+
+    // Append hit count annotation to multi-hit moves ("X-Y% ×2-5")
+    var showMultiHitCount: Boolean = true
+        private set
+
+    // Write every unique battle snapshot + calc result to config/deltacalc/latest-calc.json for offline diagnosis
+    var debugDumpEnabled: Boolean = false
+        private set
+
     // Default log dimensions
     const val DEFAULT_LOG_WIDTH = 200
     const val DEFAULT_LOG_HEIGHT = 120
@@ -207,7 +219,10 @@ object PanelConfig {
         // Tooltip display options
         val showTeraType: Boolean = false,
         val showStatRanges: Boolean = true,
-        val showBaseCritRate: Boolean = false
+        val showBaseCritRate: Boolean = false,
+        val showCritDamage: Boolean = false,
+        val showMultiHitCount: Boolean = true,
+        val debugDumpEnabled: Boolean = false
     )
 
     fun load() {
@@ -254,6 +269,9 @@ object PanelConfig {
                 showTeraType = data.showTeraType
                 showStatRanges = data.showStatRanges
                 showBaseCritRate = data.showBaseCritRate
+                showCritDamage = data.showCritDamage
+                showMultiHitCount = data.showMultiHitCount
+                debugDumpEnabled = data.debugDumpEnabled
                 CobblemonExtendedBattleUI.LOGGER.info("PanelConfig: Loaded config - features: team=$enableTeamIndicators, panel=$enableBattleInfoPanel, log=$enableBattleLog, moveTooltips=$enableMoveTooltips")
             }
         } catch (e: Exception) {
@@ -293,7 +311,10 @@ object PanelConfig {
                 moveTooltipFontScale = moveTooltipFontScale,
                 showTeraType = showTeraType,
                 showStatRanges = showStatRanges,
-                showBaseCritRate = showBaseCritRate
+                showBaseCritRate = showBaseCritRate,
+                showCritDamage = showCritDamage,
+                showMultiHitCount = showMultiHitCount,
+                debugDumpEnabled = debugDumpEnabled
             )
             configFile.parentFile?.mkdirs()
             configFile.writeText(gson.toJson(data))
@@ -472,6 +493,18 @@ object PanelConfig {
 
     fun setShowBaseCritRate(show: Boolean) {
         showBaseCritRate = show
+    }
+
+    fun setShowCritDamage(show: Boolean) {
+        showCritDamage = show
+    }
+
+    fun setShowMultiHitCount(show: Boolean) {
+        showMultiHitCount = show
+    }
+
+    fun setDebugDumpEnabled(enabled: Boolean) {
+        debugDumpEnabled = enabled
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
