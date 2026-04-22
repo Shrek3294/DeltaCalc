@@ -153,6 +153,42 @@ class ModMenuIntegration : ModMenuApi {
                 .build()
         )
 
+        // Damage calc options category
+        val calcOptions = builder.getOrCreateCategory(Text.translatable("cobblemonextendedbattleui.config.category.calcOptions"))
+
+        calcOptions.addEntry(
+            entryBuilder.startBooleanToggle(
+                Text.translatable("cobblemonextendedbattleui.config.showMultiHitCount"),
+                PanelConfig.showMultiHitCount
+            )
+                .setDefaultValue(true)
+                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.showMultiHitCount.tooltip"))
+                .setSaveConsumer { value -> PanelConfig.setShowMultiHitCount(value) }
+                .build()
+        )
+
+        calcOptions.addEntry(
+            entryBuilder.startBooleanToggle(
+                Text.translatable("cobblemonextendedbattleui.config.showCritDamage"),
+                PanelConfig.showCritDamage
+            )
+                .setDefaultValue(false)
+                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.showCritDamage.tooltip"))
+                .setSaveConsumer { value -> PanelConfig.setShowCritDamage(value) }
+                .build()
+        )
+
+        calcOptions.addEntry(
+            entryBuilder.startBooleanToggle(
+                Text.translatable("cobblemonextendedbattleui.config.debugDumpEnabled"),
+                PanelConfig.debugDumpEnabled
+            )
+                .setDefaultValue(false)
+                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.debugDumpEnabled.tooltip"))
+                .setSaveConsumer { value -> PanelConfig.setDebugDumpEnabled(value) }
+                .build()
+        )
+
         return builder.build()
     }
 }

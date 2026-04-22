@@ -20,7 +20,8 @@ data class BattleSpeciesEntry(
     val formName: String?,
     val aliases: List<String> = emptyList(),
     val typeNames: List<String> = emptyList(),
-    val baseStats: BattleBaseStats? = null
+    val baseStats: BattleBaseStats? = null,
+    val weightKg: Double? = null
 )
 
 data class BattleBaseStats(

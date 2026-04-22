@@ -59,7 +59,8 @@ data class CalcPokemonSnapshot(
     val moveList: List<CalcMoveRef>,
     val baseStats: CalcStats?,
     val actualStats: CalcStats?,
-    val canEvolve: Boolean
+    val canEvolve: Boolean,
+    val weightKg: Double? = null
 ) {
     fun stageFor(statName: String): Int {
         val needles = statLookupCandidates(statName)
@@ -155,7 +156,15 @@ data class DamageEstimate(
     val confidence: DamageConfidence,
     val warnings: List<String> = emptyList(),
     val supported: Boolean = true,
-    val emphasized: Boolean = false
+    val emphasized: Boolean = false,
+    val critMinDamage: Int? = null,
+    val critMaxDamage: Int? = null,
+    val critMinPercent: Double? = null,
+    val critMaxPercent: Double? = null,
+    val damageRolls: List<Int> = emptyList(),
+    val critDamageRolls: List<Int> = emptyList(),
+    val minHits: Int = 1,
+    val maxHits: Int = 1
 )
 
 data class DamageComputationResult(

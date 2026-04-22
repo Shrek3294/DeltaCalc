@@ -36,6 +36,17 @@
   "cobblemonextendedbattleui.config.showBaseCritRate": "Show Base Crit Rate",
   "cobblemonextendedbattleui.config.showBaseCritRate.tooltip": "Always show crit rate in move tooltips. When disabled, only shows crit rate for high-crit moves or when boosted by items/abilities.",
 
+  "cobblemonextendedbattleui.config.category.calcOptions": "Damage Calc Options",
+
+  "cobblemonextendedbattleui.config.showMultiHitCount": "Show Multi-Hit Count",
+  "cobblemonextendedbattleui.config.showMultiHitCount.tooltip": "Append ×N or ×N-M to damage rows for moves that hit multiple times (Bullet Seed, Rock Blast, etc.)",
+
+  "cobblemonextendedbattleui.config.showCritDamage": "Show Crit Damage Range",
+  "cobblemonextendedbattleui.config.showCritDamage.tooltip": "Append '/ crit X-Y%' to each damage row showing the range on a critical hit.",
+
+  "cobblemonextendedbattleui.config.debugDumpEnabled": "Debug: Write Calc Dumps",
+  "cobblemonextendedbattleui.config.debugDumpEnabled.tooltip": "Write every unique battle snapshot plus full calc result (rolls, crit rolls, spread source, warnings) to config/deltacalc/latest-calc.json. Useful for reporting calc issues — leave off otherwise.",
+
   "cobblemonextendedbattleui.stat.attack": "Attack",
   "cobblemonextendedbattleui.stat.attack.abbr": "Atk",
   "cobblemonextendedbattleui.stat.defense": "Defense",

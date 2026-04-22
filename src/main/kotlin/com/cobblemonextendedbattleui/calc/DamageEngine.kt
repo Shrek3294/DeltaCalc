@@ -324,7 +324,7 @@ object BestEffortDamageEngine : DamageEngine {
             return unsupportedEstimate(resolvedDisplayName, blockingIssues.first(), guessed, emphasize)
         }
 
-        val category = effectiveCategory(template, attacker)
+        val category = effectiveCategory(template, attacker, defender)
         if (category == DamageCategories.STATUS) {
             return unsupportedEstimate(resolvedDisplayName, "Status move", guessed, emphasize)
         }
@@ -340,19 +340,41 @@ object BestEffortDamageEngine : DamageEngine {
             warnings += "Guessed opponent move"
         }
 
+        val defenderMaxHp = resolvedMaxHp(defender)
+        val defenderCurrentHp = resolvedCurrentHp(defender)
+        val defenderAtFullHp = defenderMaxHp > 0 && defenderCurrentHp >= defenderMaxHp
+
+        fixedDamageOverride(template, attacker, defender, defenderMaxHp)?.let { fixed ->
+            return DamageEstimate(
+                moveId = moveId,
+                moveName = moveDisplayName,
+                minDamage = fixed,
+                maxDamage = fixed,
+                minPercent = damagePercent(fixed, defenderMaxHp),
+                maxPercent = damagePercent(fixed, defenderMaxHp),
+                koLabel = koLabel(defenderCurrentHp, fixed, fixed),
+                confidence = confidenceFor(attacker, defender, guessed, warnings, blockingIssues),
+                warnings = warnings,
+                emphasized = emphasize
+            )
+        }
+
         val power = effectivePower(template, attacker, defender, context)
         if (power <= 0) {
             return unsupportedEstimate(resolvedDisplayName, "No damaging power", guessed, emphasize)
         }
 
-        val defenderMaxHp = resolvedMaxHp(defender)
-        val defenderCurrentHp = resolvedCurrentHp(defender)
-
+        val bypassAbility = bypassesDefenderAbility(attacker.abilityName) || moveBypassesDefenderAbility(template)
         var effectiveness = defender.snapshot.typeNames
             .mapNotNull { ElementalTypes.get(it.lowercase()) }
             .fold(1.0) { acc, defendingType -> acc * AIUtility.getDamageMultiplier(moveType, defendingType) }
 
-        effectiveness *= abilityTypeModifier(defender.abilityName, moveTypeName)
+        if (!bypassAbility) {
+            effectiveness *= abilityTypeModifier(defender.abilityName, moveTypeName)
+        }
+        if (wonderGuardBlocks(defender, attacker.abilityName, effectiveness)) {
+            effectiveness = 0.0
+        }
         if (effectiveness == 0.0) {
             return DamageEstimate(
                 moveId = moveId,
@@ -368,51 +390,59 @@ object BestEffortDamageEngine : DamageEngine {
             )
         }
 
-        val attackStat = effectiveAttackStat(attacker, template, category)
+        val attackStat = effectiveAttackStat(attacker, defender, template, category)
         val defenseStat = effectiveDefenseStat(defender, category, context)
         if (attackStat <= 0 || defenseStat <= 0) {
             return unsupportedEstimate(resolvedDisplayName, "Incomplete stats", guessed, emphasize)
         }
 
-        val baseDamage = (((((2.0 * attacker.snapshot.level) / 5.0) + 2.0) * power * attackStat / defenseStat) / 50.0) + 2.0
+        val levelFactor = ((2.0 * attacker.snapshot.level) / 5.0) + 2.0
+        val baseDamage = ((levelFactor * power * attackStat / defenseStat) / 50.0) + 2.0
+        val critAttackStat = effectiveAttackStat(attacker, defender, template, category, isCrit = true)
+        val critDefenseStat = effectiveDefenseStat(defender, category, context, isCrit = true)
+        val critBaseDamage = ((levelFactor * power * critAttackStat / critDefenseStat) / 50.0) + 2.0
+
+        val screenFactor = screenModifier(defender, category, context)
+        val defensiveAbilityFactor = if (bypassAbility) 1.0 else defensiveAbilityModifier(defender, template, moveTypeName, category, effectiveness, defenderAtFullHp)
         var modifier = stabMultiplier(attacker, moveTypeName)
         modifier *= effectiveness
         modifier *= weatherModifier(moveTypeName, context)
         modifier *= terrainModifier(moveTypeName, template, attacker, defender, context)
-        modifier *= screenModifier(defender, category, context)
+        modifier *= screenFactor
         modifier *= burnModifier(attacker, category)
-        modifier *= offensiveAbilityModifier(attacker, moveTypeName, category, context, power)
-        modifier *= defensiveAbilityModifier(defender, moveTypeName, category, effectiveness)
+        modifier *= offensiveAbilityModifier(attacker, template, moveTypeName, category, context, effectiveness)
+        modifier *= defensiveAbilityFactor
         modifier *= deltaOffensiveAbilityModifier(attacker, moveTypeName, template, effectiveness)
         modifier *= deltaDefensiveAbilityModifier(defender, moveTypeName)
-        modifier *= itemPowerModifier(attacker, moveTypeName)
+        modifier *= itemPowerModifier(attacker, moveTypeName, category, effectiveness)
 
-        val crit = deltaGuaranteedCritMultiplier(attacker, template)
-        modifier *= crit
-        if (crit > 1.0) {
+        val guaranteedCrit = deltaGuaranteedCritMultiplier(attacker, template)
+        val normalModifier = modifier * guaranteedCrit
+        if (guaranteedCrit > 1.0) {
             warnings += "Guaranteed crit (${attacker.abilityName})"
         }
 
-        val singleMin = max(1, floor(baseDamage * modifier * 0.85).toInt())
-        val singleMax = max(1, floor(baseDamage * modifier).toInt())
+        val damageRolls = damageRolls(baseDamage, normalModifier)
+        val critMultiplier = critMultiplier(attacker)
+        val screenBypass = if (screenFactor > 0.0) 1.0 / screenFactor else 1.0
+        val critModifier = modifier * screenBypass * critMultiplier
+        val critDamageRolls = damageRolls(critBaseDamage, critModifier)
 
-        val multiHit = multiHitFor(template)
-        val minDamage: Int
-        val maxDamage: Int
-        if (multiHit != null) {
-            minDamage = singleMin * multiHit.minHits
-            maxDamage = singleMax * multiHit.maxHits
-            val hitLabel = if (multiHit.minHits == multiHit.maxHits) {
-                "${multiHit.minHits} hits"
-            } else {
-                "${multiHit.minHits}-${multiHit.maxHits} hits"
-            }
+        // Hardcoded Delta/signature multi-hit table wins over the Showdown flag DB
+        // (flag DB doesn't know Delta-only moves like Twin Cross, Searing Claws, etc.)
+        val flagEntry = MoveFlagDatabase.get(template.name)
+        val hardcodedMultiHit = multiHitFor(template)
+        val minHits = hardcodedMultiHit?.minHits ?: max(1, flagEntry?.multihitMin ?: 1)
+        val maxHits = hardcodedMultiHit?.maxHits ?: max(minHits, flagEntry?.multihitMax ?: minHits)
+        if (maxHits > 1) {
+            val hitLabel = if (minHits == maxHits) "$minHits hits" else "$minHits-$maxHits hits"
             warnings += "Multi-hit ($hitLabel)"
-        } else {
-            minDamage = singleMin
-            maxDamage = singleMax
         }
 
+        val minDamage = damageRolls.first() * minHits
+        val maxDamage = damageRolls.last() * maxHits
+        val critMinDamage = critDamageRolls.first() * minHits
+        val critMaxDamage = critDamageRolls.last() * maxHits
         val minPercent = damagePercent(minDamage, defenderMaxHp)
         val maxPercent = damagePercent(maxDamage, defenderMaxHp)
         val koLabel = koLabel(defenderCurrentHp, minDamage, maxDamage)
@@ -427,8 +457,29 @@ object BestEffortDamageEngine : DamageEngine {
             koLabel = koLabel,
             confidence = confidenceFor(attacker, defender, guessed, warnings, blockingIssues),
             warnings = warnings,
-            emphasized = emphasize
+            emphasized = emphasize,
+            critMinDamage = critMinDamage,
+            critMaxDamage = critMaxDamage,
+            critMinPercent = damagePercent(critMinDamage, defenderMaxHp),
+            critMaxPercent = damagePercent(critMaxDamage, defenderMaxHp),
+            damageRolls = damageRolls,
+            critDamageRolls = critDamageRolls,
+            minHits = minHits,
+            maxHits = maxHits
         )
+    }
+
+    private fun damageRolls(baseDamage: Double, modifier: Double): List<Int> {
+        return (85..100).map { roll ->
+            max(1, floor(baseDamage * modifier * roll / 100.0).toInt())
+        }
+    }
+
+    private fun critMultiplier(attacker: DamageCombatant): Double {
+        return when (normalizeToken(attacker.abilityName)) {
+            "sniper" -> 2.25
+            else -> 1.5
+        }
     }
 
     private fun resolveMoveTemplate(moveId: String, displayName: String): MoveTemplate? {
@@ -456,14 +507,26 @@ object BestEffortDamageEngine : DamageEngine {
         return (((2 * base + iv + ev / 4) * level) / 100) + level + 10
     }
 
-    private fun effectiveCategory(template: MoveTemplate, attacker: DamageCombatant) =
-        if (normalizeToken(template.name) == "terablast" &&
-            attacker.assumptions != null &&
-            attacker.assumptions.derivedStats.atk > attacker.assumptions.derivedStats.spa) {
-            DamageCategories.PHYSICAL
-        } else {
-            template.damageCategory
-        }
+    private fun effectiveCategory(template: MoveTemplate, attacker: DamageCombatant, defender: DamageCombatant): com.cobblemon.mod.common.api.moves.categories.DamageCategory {
+        val moveName = normalizeToken(template.name)
+        if (moveName !in SPLIT_CATEGORY_MOVES) return template.damageCategory
+        if (attacker.assumptions == null) return template.damageCategory
+        val effectivePhysical = effectiveAttackStat(attacker, defender, template, DamageCategories.PHYSICAL)
+        val effectiveSpecial = effectiveAttackStat(attacker, defender, template, DamageCategories.SPECIAL)
+        return if (effectivePhysical > effectiveSpecial) DamageCategories.PHYSICAL else DamageCategories.SPECIAL
+    }
+
+    private val SPLIT_CATEGORY_MOVES = setOf("terablast", "photongeyser", "lightthatburnsthesky")
+
+    private val MOVES_THAT_BYPASS_ABILITY = setOf(
+        "photongeyser",
+        "lightthatburnsthesky",
+        "sunsteelstrike",
+        "moongeistbeam",
+        "gmaxdrumsolo",
+        "gmaxfireball",
+        "gmaxhydrosnipe"
+    )
 
     private fun natureModifiers(nature: String): Map<String, Double> {
         val neutral = mapOf("atk" to 1.0, "def" to 1.0, "spa" to 1.0, "spd" to 1.0, "spe" to 1.0)
@@ -506,7 +569,7 @@ object BestEffortDamageEngine : DamageEngine {
             pokemonName = attacker.snapshot.speciesLabel
         )?.let { return it }
 
-        return when (normalizeToken(template.name)) {
+        val baseType = when (normalizeToken(template.name)) {
             "weatherball" -> when (normalizeToken(context.weather)) {
                 "rain" -> "water"
                 "harshsunlight", "sun", "sunlight" -> "fire"
@@ -517,6 +580,27 @@ object BestEffortDamageEngine : DamageEngine {
             "terablast" -> attacker.snapshot.teraType ?: template.elementalType.name
             else -> template.elementalType.name
         }
+        return applyTypeChangingAbility(baseType, attacker)
+    }
+
+    private fun applyTypeChangingAbility(baseType: String, attacker: DamageCombatant): String {
+        if (!baseType.equals("normal", ignoreCase = true)) return baseType
+        return when (normalizeToken(attacker.abilityName)) {
+            "pixilate" -> "fairy"
+            "aerilate" -> "flying"
+            "refrigerate" -> "ice"
+            "galvanize" -> "electric"
+            else -> baseType
+        }
+    }
+
+    private fun pixelateBoost(template: MoveTemplate, attacker: DamageCombatant): Double {
+        val originalType = template.elementalType.name
+        if (!originalType.equals("normal", ignoreCase = true)) return 1.0
+        return when (normalizeToken(attacker.abilityName)) {
+            "pixilate", "aerilate", "refrigerate", "galvanize" -> 1.2
+            else -> 1.0
+        }
     }
 
     private fun effectivePower(
@@ -525,8 +609,10 @@ object BestEffortDamageEngine : DamageEngine {
         defender: DamageCombatant,
         context: DamageContext
     ): Double {
-        return when (normalizeToken(template.name)) {
-            "hex" -> if (defender.snapshot.status != null) template.power * 2.0 else template.power
+        val moveName = normalizeToken(template.name)
+        return when (moveName) {
+            "hex", "barbbarrage", "infernalparade" -> if (defender.snapshot.status != null) template.power * 2.0 else template.power
+            "venoshock" -> if (normalizeToken(defender.snapshot.status) in setOf("poison", "poisonbadly", "badpoison")) template.power * 2.0 else template.power
             "weatherball" -> {
                 if (normalizeToken(context.weather) in setOf("rain", "harshsunlight", "sun", "sunlight", "sandstorm", "hail", "snow")) {
                     template.power * 2.0
@@ -534,42 +620,153 @@ object BestEffortDamageEngine : DamageEngine {
                     template.power
                 }
             }
+            "facade" -> {
+                val status = normalizeToken(attacker.snapshot.status)
+                if (status in setOf("burn", "poison", "poisonbadly", "badpoison", "paralysis", "paralyze")) template.power * 2.0 else template.power
+            }
+            "brine" -> {
+                val maxHp = resolvedMaxHp(defender)
+                val currentHp = resolvedCurrentHp(defender)
+                if (maxHp > 0 && currentHp * 2 <= maxHp) template.power * 2.0 else template.power
+            }
+            "storedpower" -> {
+                val positiveStages = sumPositiveStages(attacker)
+                (20 + 20 * positiveStages).toDouble()
+            }
+            "punishment" -> {
+                val positiveStages = sumPositiveStages(defender)
+                minOf(200.0, (60 + 20 * positiveStages).toDouble())
+            }
+            "electroball" -> {
+                val ratio = speedRatio(attacker, defender)
+                when {
+                    ratio >= 4.0 -> 150.0
+                    ratio >= 3.0 -> 120.0
+                    ratio >= 2.0 -> 80.0
+                    ratio >= 1.0 -> 60.0
+                    else -> 40.0
+                }
+            }
+            "gyroball" -> {
+                val attackerSpe = attacker.assumptions?.derivedStats?.spe ?: return 1.0
+                val defenderSpe = defender.assumptions?.derivedStats?.spe ?: return 1.0
+                if (attackerSpe <= 0) 1.0 else minOf(150.0, (25.0 * defenderSpe) / attackerSpe)
+            }
+            "eruption", "waterspout", "dragonenergy" -> {
+                val maxHp = resolvedMaxHp(attacker)
+                val currentHp = resolvedCurrentHp(attacker)
+                if (maxHp <= 0) template.power else maxOf(1.0, 150.0 * currentHp / maxHp)
+            }
+            "lowkick", "grassknot" -> weightBasedPower(defender)
+            "heavyslam", "heatcrash" -> weightRatioPower(attacker, defender)
+            "acrobatics" -> if (attacker.itemName.isNullOrBlank()) template.power * 2.0 else template.power
             else -> template.power
+        }
+    }
+
+    private fun sumPositiveStages(combatant: DamageCombatant): Int {
+        return combatant.snapshot.statStages.values.filter { it > 0 }.sum()
+    }
+
+    private fun speedRatio(attacker: DamageCombatant, defender: DamageCombatant): Double {
+        val attackerSpe = attacker.assumptions?.derivedStats?.spe ?: return 0.0
+        val defenderSpe = defender.assumptions?.derivedStats?.spe ?: return 0.0
+        val attackerStage = attacker.snapshot.stageFor("spe")
+        val defenderStage = defender.snapshot.stageFor("spe")
+        val effectiveAttackerSpe = StatCalculator.applyStageMultiplier(attackerSpe, attackerStage)
+        val effectiveDefenderSpe = StatCalculator.applyStageMultiplier(defenderSpe, defenderStage)
+        if (effectiveDefenderSpe <= 0) return 4.0
+        return effectiveAttackerSpe.toDouble() / effectiveDefenderSpe.toDouble()
+    }
+
+    private fun weightBasedPower(defender: DamageCombatant): Double {
+        val kg = defender.snapshot.weightKg ?: return 20.0
+        return when {
+            kg >= 200.0 -> 120.0
+            kg >= 100.0 -> 100.0
+            kg >= 50.0 -> 80.0
+            kg >= 25.0 -> 60.0
+            kg >= 10.0 -> 40.0
+            else -> 20.0
+        }
+    }
+
+    private fun weightRatioPower(attacker: DamageCombatant, defender: DamageCombatant): Double {
+        val atkKg = attacker.snapshot.weightKg ?: return 40.0
+        val defKg = defender.snapshot.weightKg ?: return 40.0
+        if (defKg <= 0) return 120.0
+        val ratio = atkKg / defKg
+        return when {
+            ratio >= 5.0 -> 120.0
+            ratio >= 4.0 -> 100.0
+            ratio >= 3.0 -> 80.0
+            ratio >= 2.0 -> 60.0
+            else -> 40.0
         }
     }
 
     private fun effectiveAttackStat(
         attacker: DamageCombatant,
+        defender: DamageCombatant,
         template: MoveTemplate,
-        category: com.cobblemon.mod.common.api.moves.categories.DamageCategory
+        category: com.cobblemon.mod.common.api.moves.categories.DamageCategory,
+        isCrit: Boolean = false
     ): Int {
-        val assumptions = attacker.assumptions ?: return 0
+        val moveName = normalizeToken(template.name)
+        val usesDefenderAtk = moveName == "foulplay"
+        val sourceCombatant = if (usesDefenderAtk) defender else attacker
+        val assumptions = sourceCombatant.assumptions ?: return 0
         val baseAttack = when {
-            normalizeToken(template.name) == "bodypress" -> assumptions.derivedStats.def
+            moveName == "bodypress" -> assumptions.derivedStats.def
             category == DamageCategories.PHYSICAL -> assumptions.derivedStats.atk
             else -> assumptions.derivedStats.spa
         }
-        val stage = when {
-            normalizeToken(template.name) == "bodypress" -> attacker.snapshot.stageFor("def")
-            category == DamageCategories.PHYSICAL -> attacker.snapshot.stageFor("atk")
-            else -> attacker.snapshot.stageFor("spa")
+        val rawStage = when {
+            moveName == "bodypress" -> sourceCombatant.snapshot.stageFor("def")
+            category == DamageCategories.PHYSICAL -> sourceCombatant.snapshot.stageFor("atk")
+            else -> sourceCombatant.snapshot.stageFor("spa")
         }
+        val stage = if (isCrit) maxOf(0, rawStage) else rawStage
         var value = StatCalculator.applyStageMultiplier(baseAttack, stage)
+        val itemHolder = if (usesDefenderAtk) defender else attacker
         value = when (category) {
-            DamageCategories.PHYSICAL -> (value * StatCalculator.getItemAttackMultiplier(attacker.itemName, attacker.snapshot.speciesId)).toInt()
-            DamageCategories.SPECIAL -> (value * StatCalculator.getItemSpecialAttackMultiplier(attacker.itemName, attacker.snapshot.speciesId)).toInt()
+            DamageCategories.PHYSICAL -> (value * StatCalculator.getItemAttackMultiplier(itemHolder.itemName, itemHolder.snapshot.speciesId)).toInt()
+            DamageCategories.SPECIAL -> (value * StatCalculator.getItemSpecialAttackMultiplier(itemHolder.itemName, itemHolder.snapshot.speciesId)).toInt()
             else -> value
         }
         return max(1, value)
     }
 
+    private fun fixedDamageOverride(
+        template: MoveTemplate,
+        attacker: DamageCombatant,
+        defender: DamageCombatant,
+        defenderMaxHp: Int
+    ): Int? {
+        return when (normalizeToken(template.name)) {
+            "seismictoss", "nightshade" -> max(1, attacker.snapshot.level)
+            "dragonrage" -> 40
+            "sonicboom" -> 20
+            "superfang" -> max(1, resolvedCurrentHp(defender) / 2)
+            "endeavor" -> {
+                val diff = resolvedCurrentHp(defender) - resolvedCurrentHp(attacker)
+                if (diff > 0) diff else null
+            }
+            "finalgambit" -> max(1, resolvedCurrentHp(attacker))
+            "psywave" -> max(1, (attacker.snapshot.level * 1.0).toInt())
+            else -> null
+        }
+    }
+
     private fun effectiveDefenseStat(
         defender: DamageCombatant,
         category: com.cobblemon.mod.common.api.moves.categories.DamageCategory,
-        context: DamageContext
+        context: DamageContext,
+        isCrit: Boolean = false
     ): Int {
         val assumptions = defender.assumptions ?: return 0
-        val stage = if (category == DamageCategories.PHYSICAL) defender.snapshot.stageFor("def") else defender.snapshot.stageFor("spd")
+        val rawStage = if (category == DamageCategories.PHYSICAL) defender.snapshot.stageFor("def") else defender.snapshot.stageFor("spd")
+        val stage = if (isCrit) minOf(0, rawStage) else rawStage
         var value = if (category == DamageCategories.PHYSICAL) {
             StatCalculator.applyStageMultiplier(assumptions.derivedStats.def, stage)
         } else {
@@ -666,14 +863,17 @@ object BestEffortDamageEngine : DamageEngine {
 
     private fun offensiveAbilityModifier(
         attacker: DamageCombatant,
+        template: MoveTemplate,
         moveTypeName: String,
         category: com.cobblemon.mod.common.api.moves.categories.DamageCategory,
         context: DamageContext,
-        power: Double
+        effectiveness: Double
     ): Double {
-        return when (normalizeToken(attacker.abilityName)) {
+        val ability = normalizeToken(attacker.abilityName)
+        val flagEntry = MoveFlagDatabase.get(template.name)
+        val power = template.power.toInt()
+        return when (ability) {
             "hugepower", "purepower" -> if (category == DamageCategories.PHYSICAL) 2.0 else 1.0
-            "technician" -> if (power > 0.0 && power <= 60.0) 1.5 else 1.0
             "guts" -> if (category == DamageCategories.PHYSICAL && attacker.snapshot.status != null) 1.5 else 1.0
             "solarpower" -> if (category == DamageCategories.SPECIAL && normalizeToken(context.weather) in setOf("harshsunlight", "sun", "sunlight")) 1.5 else 1.0
             "flareboost" -> if (category == DamageCategories.SPECIAL && normalizeToken(attacker.snapshot.status) == "burn") 1.5 else 1.0
@@ -682,22 +882,52 @@ object BestEffortDamageEngine : DamageEngine {
             "torrent" -> if (normalizeToken(moveTypeName) == "water" && isLowHp(attacker)) 1.5 else 1.0
             "overgrow" -> if (normalizeToken(moveTypeName) == "grass" && isLowHp(attacker)) 1.5 else 1.0
             "swarm" -> if (normalizeToken(moveTypeName) == "bug" && isLowHp(attacker)) 1.5 else 1.0
+            "toughclaws" -> if (flagEntry?.isContact == true) 1.3 else 1.0
+            "strongjaw" -> if (flagEntry?.isBite == true) 1.5 else 1.0
+            "ironfist" -> if (flagEntry?.isPunch == true) 1.2 else 1.0
+            "megalauncher" -> if (flagEntry?.isPulse == true) 1.5 else 1.0
+            "sharpness" -> if (flagEntry?.isSlicing == true) 1.5 else 1.0
+            "punkrock" -> if (flagEntry?.isSound == true) 1.3 else 1.0
+            "reckless" -> if (flagEntry?.isRecoil == true) 1.2 else 1.0
+            "sheerforce" -> if (flagEntry?.hasSecondary == true) 1.3 else 1.0
+            "technician" -> if (power in 1..60) 1.5 else 1.0
+            "tintedlens" -> if (effectiveness in 0.0..0.999) 2.0 else 1.0
+            "waterbubble" -> if (normalizeToken(moveTypeName) == "water") 2.0 else 1.0
+            "steelworker", "steelyspirit" -> if (normalizeToken(moveTypeName) == "steel") 1.5 else 1.0
+            "dragonsmaw" -> if (normalizeToken(moveTypeName) == "dragon") 1.5 else 1.0
+            "transistor" -> if (normalizeToken(moveTypeName) == "electric") 1.3 else 1.0
+            "rockypayload" -> if (normalizeToken(moveTypeName) == "rock") 1.5 else 1.0
+            "aerilate", "pixilate", "refrigerate", "galvanize" -> pixelateBoost(template, attacker)
             else -> 1.0
         }
     }
 
     private fun defensiveAbilityModifier(
         defender: DamageCombatant,
+        template: MoveTemplate,
         moveTypeName: String,
         category: com.cobblemon.mod.common.api.moves.categories.DamageCategory,
-        effectiveness: Double
+        effectiveness: Double,
+        defenderAtFullHp: Boolean
     ): Double {
+        val flagEntry = MoveFlagDatabase.get(template.name)
         return when (normalizeToken(defender.abilityName)) {
             "thickfat" -> if (normalizeToken(moveTypeName) in setOf("fire", "ice")) 0.5 else 1.0
             "heatproof" -> if (normalizeToken(moveTypeName) == "fire") 0.5 else 1.0
+            "waterbubble" -> if (normalizeToken(moveTypeName) == "fire") 0.5 else 1.0
+            "dryskin" -> if (normalizeToken(moveTypeName) == "fire") 1.25 else 1.0
+            "fluffy" -> when {
+                flagEntry?.isContact == true && normalizeToken(moveTypeName) != "fire" -> 0.5
+                normalizeToken(moveTypeName) == "fire" -> 2.0
+                else -> 1.0
+            }
             "furcoat" -> if (category == DamageCategories.PHYSICAL) 0.5 else 1.0
+            "icescales" -> if (category == DamageCategories.SPECIAL) 0.5 else 1.0
             "marvelscale" -> if (category == DamageCategories.PHYSICAL && defender.snapshot.status != null) 2.0 / 3.0 else 1.0
             "filter", "solidrock", "prismarmor" -> if (effectiveness > 1.0) 0.75 else 1.0
+            "multiscale", "shadowshield" -> if (defenderAtFullHp) 0.5 else 1.0
+            "punkrock" -> if (flagEntry?.isSound == true) 0.5 else 1.0
+            "purifyingsalt" -> if (normalizeToken(moveTypeName) == "ghost") 0.5 else 1.0
             else -> 1.0
         }
     }
@@ -713,8 +943,34 @@ object BestEffortDamageEngine : DamageEngine {
         }
     }
 
-    private fun itemPowerModifier(attacker: DamageCombatant, moveTypeName: String): Double {
+    private fun bypassesDefenderAbility(attackerAbility: String?): Boolean {
+        return normalizeToken(attackerAbility) in setOf("moldbreaker", "turboblaze", "teravolt")
+    }
+
+    private fun moveBypassesDefenderAbility(template: MoveTemplate): Boolean {
+        return normalizeToken(template.name) in MOVES_THAT_BYPASS_ABILITY
+    }
+
+    private fun wonderGuardBlocks(defender: DamageCombatant, attackerAbility: String?, effectiveness: Double): Boolean {
+        if (bypassesDefenderAbility(attackerAbility)) return false
+        if (normalizeToken(defender.abilityName) != "wonderguard") return false
+        return effectiveness > 0.0 && effectiveness <= 1.0
+    }
+
+    private fun itemPowerModifier(
+        attacker: DamageCombatant,
+        moveTypeName: String,
+        category: com.cobblemon.mod.common.api.moves.categories.DamageCategory,
+        effectiveness: Double
+    ): Double {
         val itemId = normalizeToken(attacker.itemName)
+        if (itemId.isBlank()) return 1.0
+        when (itemId) {
+            "expertbelt" -> return if (effectiveness > 1.0) 1.2 else 1.0
+            "muscleband" -> return if (category == DamageCategories.PHYSICAL) 1.1 else 1.0
+            "wiseglasses" -> return if (category == DamageCategories.SPECIAL) 1.1 else 1.0
+            "metronome" -> return 1.0
+        }
         val itemBoost = ItemPowerBoostParser.getBoostForItem(itemId) ?: return 1.0
         if (itemBoost.boostedType == null) return itemBoost.multiplier
         return if (normalizeToken(itemBoost.boostedType) == normalizeToken(moveTypeName)) itemBoost.multiplier else 1.0

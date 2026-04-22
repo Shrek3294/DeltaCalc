@@ -18,12 +18,13 @@ object DeltaBattlePlatformAdapter : BattlePlatformAdapter {
     override fun currentScreenClassName(): String? = MinecraftClient.getInstance().currentScreen?.javaClass?.name
 
     override fun compatNotes(): List<String> {
-        val screenClass = currentScreenClassName().orEmpty()
         val notes = mutableListOf<String>()
+        // DeltaClient UI detection: no official API exists, so class-name sniff is unavoidable here.
+        val screenClass = currentScreenClassName().orEmpty()
         if (screenClass.contains("deltaclient", ignoreCase = true)) {
             notes += "DeltaClient battle UI detected"
         }
-        if (PanelConfig.enableBattleLog && screenClass.contains("battle", ignoreCase = true)) {
+        if (PanelConfig.enableBattleLog && CobblemonClient.battle != null) {
             notes += "Custom log suppression active"
         }
         return notes

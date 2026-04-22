@@ -1,11 +1,11 @@
 package com.deltacalc.battle;
 
+import com.cobblemon.mod.common.client.CobblemonClient;
 import com.deltacalc.config.DeltaCalcConfig;
 import com.deltacalc.inference.ConfidenceBand;
 import com.deltacalc.inference.GuessState;
 import com.deltacalc.inference.GuessValue;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.client.MinecraftClient;
@@ -37,13 +37,13 @@ public final class BattleTracker {
         String screenName = screen == null ? "<none>" : screen.getClass().getName();
         if (!screenName.equals(lastScreenName)) {
             lastScreenName = screenName;
-            logger.info("DeltaCalc screen changed to {}", screenName);
+            logger.debug("DeltaCalc screen changed to {}", screenName);
         }
 
-        boolean battleActive = config.demoBattleForced() || isLikelyBattleScreen(screen);
+        boolean battleActive = config.demoBattleForced() || CobblemonClient.INSTANCE.getBattle() != null;
         if (battleActive && currentSnapshot == null) {
             currentSnapshot = createDemoSnapshot();
-            logger.info("DeltaCalc entered battle context using {}", config.demoBattleForced() ? "forced demo snapshot" : "screen heuristic");
+            logger.info("DeltaCalc entered battle context using {}", config.demoBattleForced() ? "forced demo snapshot" : "Cobblemon ClientBattle");
             return;
         }
 
@@ -91,18 +91,6 @@ public final class BattleTracker {
         );
 
         logger.info("DeltaCalc cycled demo reveal state to step {}", demoRevealStep);
-    }
-
-    private boolean isLikelyBattleScreen(Screen screen) {
-        if (screen == null) {
-            return false;
-        }
-
-        String className = screen.getClass().getName().toLowerCase(Locale.ROOT);
-        String title = screen.getTitle() == null ? "" : screen.getTitle().getString().toLowerCase(Locale.ROOT);
-        return className.contains("battle")
-            || className.contains("cobblemon")
-            || title.contains("battle");
     }
 
     private ActiveMonSnapshot withOpponentReveal(ActiveMonSnapshot opponent, String move, String item, String ability) {
