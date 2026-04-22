@@ -26,6 +26,119 @@ object BestEffortDamageEngine : DamageEngine {
     private val neutralIvs = CalcStats(31, 31, 31, 31, 31, 31)
     private val zeroEvs = CalcStats(0, 0, 0, 0, 0, 0)
 
+    private data class MultiHitInfo(val minHits: Int, val maxHits: Int)
+
+    private val multiHitMoves: Map<String, MultiHitInfo> = mapOf(
+        "bulletseed" to MultiHitInfo(2, 5),
+        "rockblast" to MultiHitInfo(2, 5),
+        "iciclespear" to MultiHitInfo(2, 5),
+        "pinmissile" to MultiHitInfo(2, 5),
+        "armthrust" to MultiHitInfo(2, 5),
+        "tailslap" to MultiHitInfo(2, 5),
+        "furyswipes" to MultiHitInfo(2, 5),
+        "furyattack" to MultiHitInfo(2, 5),
+        "cometpunch" to MultiHitInfo(2, 5),
+        "doubleslap" to MultiHitInfo(2, 5),
+        "spikecannon" to MultiHitInfo(2, 5),
+        "barrage" to MultiHitInfo(2, 5),
+        "scaleshot" to MultiHitInfo(2, 5),
+        "watershuriken" to MultiHitInfo(2, 5),
+        "doublekick" to MultiHitInfo(2, 2),
+        "doubleironbash" to MultiHitInfo(2, 2),
+        "doublehit" to MultiHitInfo(2, 2),
+        "bonemerang" to MultiHitInfo(2, 2),
+        "twineedle" to MultiHitInfo(2, 2),
+        "dualchop" to MultiHitInfo(2, 2),
+        "geargrind" to MultiHitInfo(2, 2),
+        "dragondarts" to MultiHitInfo(2, 2),
+        "tripleaxel" to MultiHitInfo(3, 3),
+        "triplekick" to MultiHitInfo(3, 3),
+        "surgingstrikes" to MultiHitInfo(3, 3),
+        "populationbomb" to MultiHitInfo(1, 10),
+        // Delta-specific multi-hit signature moves (sourced from the Delta
+        // team-builder dump). Keys normalized via normalizeToken.
+        "twincross" to MultiHitInfo(2, 2),       // Draculedge: Dragon Phys 50 BP
+        "lumencascade" to MultiHitInfo(2, 2),    // Normal Spec 50 BP
+        "searingclaws" to MultiHitInfo(2, 2),    // Fire Phys 35 BP
+        "dualdivide" to MultiHitInfo(2, 2),      // Bug Phys 40 BP
+        "tomahawkvolley" to MultiHitInfo(2, 5),  // Fire Phys 20 BP
+        "wretchedstab" to MultiHitInfo(2, 5),    // Ghost Phys 20 BP
+        "divinevolley" to MultiHitInfo(1, 6),    // Fighting Phys 20 BP
+        "quillstorm" to MultiHitInfo(1, 3)       // Fire Phys; per-hit BP escalates 20/40/60
+    )
+
+    private fun multiHitFor(template: MoveTemplate): MultiHitInfo? {
+        return multiHitMoves[normalizeToken(template.name)]
+    }
+
+    // Move tag sets used by ability triggers (Reap, Torque Step, etc.).
+    // Keys normalized via normalizeToken.
+    private val slicingMoves: Set<String> = setOf(
+        "aerialace", "aircutter", "airslash", "behemothblade", "bitterblade",
+        "ceaselessedge", "crosspoison", "cut", "furycutter", "kowtowcleave",
+        "leafblade", "nightslash", "populationbomb", "psyblade", "psychocut",
+        "razorleaf", "razorshell", "sacredsword", "secretsword", "slash",
+        "solarblade", "stoneaxe", "stormthrow", "xscissor",
+        "dualdivide" // Delta
+    )
+
+    private val kickingMoves: Set<String> = setOf(
+        "axekick", "blazekick", "doublekick", "highhorsepower", "highjumpkick",
+        "jumpkick", "lowkick", "lowsweep", "megakick", "pyroball",
+        "rollingkick", "stomp", "stompingtantrum", "thunderouskick",
+        "tripleaxel", "triplekick", "tropkick"
+    )
+
+    private fun isSlicing(template: MoveTemplate): Boolean =
+        normalizeToken(template.name) in slicingMoves
+
+    private fun isKicking(template: MoveTemplate): Boolean =
+        normalizeToken(template.name) in kickingMoves
+
+    private fun deltaGuaranteedCritMultiplier(
+        attacker: DamageCombatant,
+        template: MoveTemplate
+    ): Double {
+        val ability = normalizeToken(attacker.abilityName)
+        val guaranteedCrit = when (ability) {
+            "reap" -> isSlicing(template)
+            else -> false
+        }
+        return if (guaranteedCrit) 1.5 else 1.0
+    }
+
+    private fun deltaOffensiveAbilityModifier(
+        attacker: DamageCombatant,
+        moveTypeName: String,
+        template: MoveTemplate,
+        effectiveness: Double
+    ): Double {
+        val ability = normalizeToken(attacker.abilityName)
+        val type = normalizeToken(moveTypeName)
+        return when (ability) {
+            "flurry" -> if (type == "ice" && isLowHp(attacker)) 1.5 else 1.0
+            "draconic" -> if (type == "dragon" && isLowHp(attacker)) 1.5 else 1.0
+            "pyroclastic" -> if (type == "rock") 1.3 else 1.0
+            "stoneheart" -> if (type == "rock") 1.5 else 1.0
+            "valorheart" -> 1.2
+            "torquestep" -> if (isKicking(template)) 1.3 else 1.0
+            "conviction" -> if (effectiveness > 1.0) 1.25 else 1.0
+            else -> 1.0
+        }
+    }
+
+    private fun deltaDefensiveAbilityModifier(
+        defender: DamageCombatant,
+        moveTypeName: String
+    ): Double {
+        val ability = normalizeToken(defender.abilityName)
+        val type = normalizeToken(moveTypeName)
+        return when (ability) {
+            "igneous" -> if (type == "fire" || type == "water") 0.5 else 1.0
+            else -> 1.0
+        }
+    }
+
     override fun compute(
         snapshot: CalcBattleSnapshot,
         playerSnapshot: CalcPokemonSnapshot?,
@@ -270,10 +383,36 @@ object BestEffortDamageEngine : DamageEngine {
         modifier *= burnModifier(attacker, category)
         modifier *= offensiveAbilityModifier(attacker, moveTypeName, category, context, power)
         modifier *= defensiveAbilityModifier(defender, moveTypeName, category, effectiveness)
+        modifier *= deltaOffensiveAbilityModifier(attacker, moveTypeName, template, effectiveness)
+        modifier *= deltaDefensiveAbilityModifier(defender, moveTypeName)
         modifier *= itemPowerModifier(attacker, moveTypeName)
 
-        val minDamage = max(1, floor(baseDamage * modifier * 0.85).toInt())
-        val maxDamage = max(1, floor(baseDamage * modifier).toInt())
+        val crit = deltaGuaranteedCritMultiplier(attacker, template)
+        modifier *= crit
+        if (crit > 1.0) {
+            warnings += "Guaranteed crit (${attacker.abilityName})"
+        }
+
+        val singleMin = max(1, floor(baseDamage * modifier * 0.85).toInt())
+        val singleMax = max(1, floor(baseDamage * modifier).toInt())
+
+        val multiHit = multiHitFor(template)
+        val minDamage: Int
+        val maxDamage: Int
+        if (multiHit != null) {
+            minDamage = singleMin * multiHit.minHits
+            maxDamage = singleMax * multiHit.maxHits
+            val hitLabel = if (multiHit.minHits == multiHit.maxHits) {
+                "${multiHit.minHits} hits"
+            } else {
+                "${multiHit.minHits}-${multiHit.maxHits} hits"
+            }
+            warnings += "Multi-hit ($hitLabel)"
+        } else {
+            minDamage = singleMin
+            maxDamage = singleMax
+        }
+
         val minPercent = damagePercent(minDamage, defenderMaxHp)
         val maxPercent = damagePercent(maxDamage, defenderMaxHp)
         val koLabel = koLabel(defenderCurrentHp, minDamage, maxDamage)
