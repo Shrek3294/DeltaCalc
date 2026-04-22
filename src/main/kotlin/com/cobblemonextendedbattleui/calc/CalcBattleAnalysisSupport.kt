@@ -6,149 +6,25 @@ import com.cobblemon.mod.common.api.types.ElementalTypes
 import com.cobblemon.mod.common.battles.ai.strongBattleAI.AIUtility
 import com.cobblemonextendedbattleui.BattleStateTracker
 import com.cobblemonextendedbattleui.TeamIndicatorUI
-import com.cobblemonextendedbattleui.compat.delta.DeltaBattlePlatformAdapter
 import com.cobblemonextendedbattleui.pokemon.stats.StatCalculator
-import com.cobblemonextendedbattleui.tracking.BattleStateFacade
 import net.minecraft.util.Identifier
-import java.util.UUID
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
-object CalcComputationService {
-    private val platformAdapter = DeltaBattlePlatformAdapter
-    private val battleDatabase = BattleDatabase.loadDefault()
-    private val invalidationCoordinator = CalcInvalidationCoordinator()
-    private val inferenceService = OpponentInferenceService()
-    private val previewSelectionState = CalcPreviewSelectionState()
-    private val damageEngine: DamageEngine = BestEffortDamageEngine
-    private var currentModel: CalcRenderModel? = null
-    private var lastSelectionFingerprint: String = ""
+object CalcBattleAnalysisSupport {
+    data class SwitchPreviewInfo(
+        val effectiveCurrentHp: Int,
+        val summaryText: String?,
+        val hazardNoteText: String?
+    )
 
-    fun currentModel(): CalcRenderModel? {
-        val truth = BattleStateFacade.capture(platformAdapter) ?: run {
-            currentModel = null
-            lastSelectionFingerprint = ""
-            return null
-        }
-
-        val snapshot = CalcBattleSnapshotFactory.fromTruth(truth, battleDatabase)
-        val snapshotChanged = invalidationCoordinator.update(snapshot)
-        val selection = previewSelectionState.resolve(snapshot)
-        val selectionFingerprint = previewSelectionState.fingerprint()
-        if (snapshotChanged || currentModel == null || lastSelectionFingerprint != selectionFingerprint) {
-            val selectedPlayer = snapshot.findPlayer(selection.playerUuid) ?: snapshot.playerActive
-            val selectedOpponent = snapshot.findOpponent(selection.opponentUuid) ?: snapshot.opponentActive
-            val inferredSet = inferenceService.infer(snapshot, selectedOpponent, battleDatabase)
-            val reasons = invalidationCoordinator.consumeReasons()
-            val switchPreview = buildSwitchPreview(selectedPlayer, snapshot)
-            val damageResult = damageEngine.compute(
-                snapshot = snapshot,
-                playerSnapshot = selectedPlayer,
-                opponentSnapshot = selectedOpponent,
-                inferredSet = inferredSet,
-                playerEffectiveCurrentHp = switchPreview.effectiveCurrentHp,
-                emphasizeSelectedMove = selectedPlayer?.uuid == snapshot.playerActiveUuid
-            )
-            val reasonText = if (reasons.isEmpty()) {
-                "Snapshot stable"
-            } else {
-                "Recomputed: " + reasons.joinToString(", ") { it.name.lowercase().replace('_', ' ') }
-            }
-            val warningText = damageResult.warnings.takeIf { it.isNotEmpty() }?.joinToString(" | ")
-            val trackedFallbackMoves = TeamIndicatorUI.getTrackedRevealedMoves(
-                displayName = selectedOpponent?.displayName,
-                speciesName = selectedOpponent?.speciesId,
-                formName = selectedOpponent?.formName
-            )
-            val debugText = buildString {
-                append("Calc rev: ")
-                append(selectedOpponent?.revealedMoves?.joinToString(", ").orEmpty().ifBlank { "none" })
-                append(" | Tracked rev: ")
-                append(trackedFallbackMoves.joinToString(", ").ifBlank { "none" })
-                append(" | Rendered: ")
-                append(damageResult.opponentMoves.joinToString(", ") { it.moveName })
-            }
-            currentModel = CalcRenderModel(
-                snapshot = snapshot,
-                selectedPlayerUuid = selectedPlayer?.uuid,
-                selectedOpponentUuid = selectedOpponent?.uuid,
-                selectedPlayer = selectedPlayer,
-                selectedOpponent = selectedOpponent,
-                playerTabs = buildTabs(snapshot.playerTeam, selectedPlayer?.uuid, snapshot.playerActiveUuid),
-                opponentTabs = buildTabs(snapshot.opponentTeam, selectedOpponent?.uuid, snapshot.opponentActiveUuid),
-                matchupLabel = buildMatchupLabel(selectedPlayer, selectedOpponent),
-                switchSummaryText = switchPreview.summaryText,
-                hazardNoteText = switchPreview.hazardNoteText,
-                isPreview = selectedPlayer?.uuid != snapshot.playerActiveUuid || selectedOpponent?.uuid != snapshot.opponentActiveUuid,
-                opponentSet = inferredSet,
-                yourMoves = damageResult.yourMoves.map(::toRow),
-                opponentMoves = damageResult.opponentMoves.map(::toRow),
-                statusText = listOfNotNull(reasonText, warningText).joinToString(" | "),
-                speedText = buildSpeedText(selectedPlayer, selectedOpponent, inferredSet),
-                debugText = debugText
-            )
-            lastSelectionFingerprint = selectionFingerprint
-        }
-        return currentModel
-    }
-
-    fun selectPlayerPreview(uuid: UUID?) {
-        previewSelectionState.selectPlayer(uuid)
-        currentModel = null
-    }
-
-    fun selectOpponentPreview(uuid: UUID?) {
-        previewSelectionState.selectOpponent(uuid)
-        currentModel = null
-    }
-
-    private fun toRow(estimate: DamageEstimate): CalcMoveRow {
-        val damageText = when {
-            !estimate.supported -> estimate.warnings.firstOrNull()?.lowercase() ?: "unsupported"
-            estimate.minPercent != null && estimate.maxPercent != null ->
-                "${formatPercent(estimate.minPercent)} - ${formatPercent(estimate.maxPercent)}%"
-            else -> "best-effort"
-        }
-        return CalcMoveRow(
-            moveName = estimate.moveName,
-            damageText = damageText,
-            koText = estimate.koLabel,
-            emphasized = estimate.emphasized
-        )
-    }
-
-    private fun formatPercent(value: Double): String {
-        val roundedTenth = (value * 10.0).roundToInt() / 10.0
-        return if (roundedTenth == roundedTenth.toInt().toDouble()) {
-            roundedTenth.toInt().toString()
-        } else {
-            roundedTenth.toString()
-        }
-    }
-
-    private fun buildTabs(
-        team: List<CalcPokemonSnapshot>,
-        selectedUuid: UUID?,
-        activeUuid: UUID?
-    ): List<CalcPreviewTab> {
-        return team.map { pokemon ->
-            CalcPreviewTab(
-                uuid = pokemon.uuid,
-                label = tabLabel(pokemon),
-                isSelected = pokemon.uuid == selectedUuid,
-                isActive = pokemon.uuid == activeUuid,
-                isDisabled = pokemon.currentHp <= 0
-            )
-        }
-    }
-
-    private fun buildMatchupLabel(player: CalcPokemonSnapshot?, opponent: CalcPokemonSnapshot?): String {
+    fun buildMatchupLabel(player: CalcPokemonSnapshot?, opponent: CalcPokemonSnapshot?): String {
         val playerName = player?.speciesLabel ?: player?.displayName ?: "Your Active"
         val opponentName = opponent?.speciesLabel ?: opponent?.displayName ?: "Opponent Active"
         return "$playerName -> $opponentName"
     }
 
-    private fun buildSpeedText(player: CalcPokemonSnapshot?, opponent: CalcPokemonSnapshot?, inferredSet: EffectiveBattleSet): String? {
+    fun buildSpeedText(player: CalcPokemonSnapshot?, opponent: CalcPokemonSnapshot?, inferredSet: EffectiveBattleSet): String? {
         player ?: return null
         opponent ?: return null
         val playerBaseSpeed = player.actualStats?.spe ?: return null
@@ -175,7 +51,7 @@ object CalcComputationService {
         }?.let { "$it ($playerEffective vs ${formatOpponentSpeed(opponentRange, guessedOpponentSpeed)})" }
     }
 
-    private fun buildSwitchPreview(player: CalcPokemonSnapshot?, snapshot: CalcBattleSnapshot): SwitchPreviewInfo {
+    fun buildSwitchPreview(player: CalcPokemonSnapshot?, snapshot: CalcBattleSnapshot): SwitchPreviewInfo {
         player ?: return SwitchPreviewInfo(0, null, null)
         if (player.uuid == snapshot.playerActiveUuid) {
             return SwitchPreviewInfo(
@@ -217,9 +93,18 @@ object CalcComputationService {
         val noteText = notes.takeIf { it.isNotEmpty() }?.joinToString(" | ")
         return SwitchPreviewInfo(
             effectiveCurrentHp = currentHp,
-            summaryText = "Switch-in HP: $currentHp/$maxHp (${formatPercent(currentHp * 100.0 / maxHp) }%)",
+            summaryText = "Switch-in HP: $currentHp/$maxHp (${formatPercent(currentHp * 100.0 / maxHp)}%)",
             hazardNoteText = noteText
         )
+    }
+
+    fun formatPercent(value: Double): String {
+        val roundedTenth = (value * 10.0).roundToInt() / 10.0
+        return if (roundedTenth == roundedTenth.toInt().toDouble()) {
+            roundedTenth.toInt().toString()
+        } else {
+            roundedTenth.toString()
+        }
     }
 
     private fun stealthRockFraction(player: CalcPokemonSnapshot): Double {
@@ -236,16 +121,6 @@ object CalcComputationService {
 
     private fun isToxicSpikesImmune(player: CalcPokemonSnapshot): Boolean {
         return player.hasType("poison") || player.hasType("steel") || !isGrounded(player)
-    }
-
-    private fun tabLabel(pokemon: CalcPokemonSnapshot): String {
-        val raw = pokemon.speciesLabel.ifBlank { pokemon.displayName }
-        return raw
-            .split("-", " ")
-            .firstOrNull()
-            ?.take(8)
-            ?.ifBlank { raw.take(8) }
-            ?: raw.take(8)
     }
 
     private fun resolveOpponentSpeedRange(opponent: CalcPokemonSnapshot): TeamIndicatorUI.SpeedRangeResult? {
@@ -321,10 +196,4 @@ object CalcComputationService {
             else -> 1.0
         }
     }
-
-    private data class SwitchPreviewInfo(
-        val effectiveCurrentHp: Int,
-        val summaryText: String?,
-        val hazardNoteText: String?
-    )
 }

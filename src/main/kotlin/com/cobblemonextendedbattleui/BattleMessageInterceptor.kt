@@ -142,55 +142,55 @@ object BattleMessageInterceptor {
             // Stat Boost/Unboost
             // ═══════════════════════════════════════════════════════════════════
 
-            TranslationKeys.BOOST_MAGNITUDE_KEYS[key]?.let { stages ->
+            mappedKeyLookup(key, TranslationKeys.BOOST_MAGNITUDE_KEYS)?.let { stages ->
                 StateUpdater.extractBoost(args, stages)
                 return
             }
 
-            TranslationKeys.UNBOOST_MAGNITUDE_KEYS[key]?.let { stages ->
+            mappedKeyLookup(key, TranslationKeys.UNBOOST_MAGNITUDE_KEYS)?.let { stages ->
                 StateUpdater.extractBoost(args, -stages)
                 return
             }
 
-            if (key == "cobblemon.battle.setboost.bellydrum" || key == "cobblemon.battle.setboost.angerpoint") {
+            if (matchesAnyVariant(key, setOf("cobblemon.battle.setboost.bellydrum", "cobblemon.battle.setboost.angerpoint"))) {
                 StateUpdater.extractSetBoost(args)
                 return
             }
 
-            if (key == "cobblemon.battle.clearallboost") {
+            if (matchesKeyVariant(key, "cobblemon.battle.clearallboost")) {
                 BattleStateTracker.clearAllStatsForAll()
                 return
             }
 
-            if (key == "cobblemon.battle.clearboost") {
+            if (matchesKeyVariant(key, "cobblemon.battle.clearboost")) {
                 StateUpdater.extractClearBoost(args)
                 return
             }
 
-            if (key == "cobblemon.battle.invertboost") {
+            if (matchesKeyVariant(key, "cobblemon.battle.invertboost")) {
                 StateUpdater.extractInvertBoost(args)
                 return
             }
 
-            if (key == "cobblemon.battle.swapboost.heartswap" || key == "cobblemon.battle.swapboost.generic") {
+            if (matchesAnyVariant(key, setOf("cobblemon.battle.swapboost.heartswap", "cobblemon.battle.swapboost.generic"))) {
                 StateUpdater.extractSwapBoostAllStats(args)
                 return
             }
 
-            if (key == "cobblemon.battle.swapboost.powerswap") {
+            if (matchesKeyVariant(key, "cobblemon.battle.swapboost.powerswap")) {
                 StateUpdater.extractSwapBoostSpecific(args, listOf(BattleStateTracker.BattleStat.ATTACK, BattleStateTracker.BattleStat.SPECIAL_ATTACK))
                 return
             }
-            if (key == "cobblemon.battle.swapboost.guardswap") {
+            if (matchesKeyVariant(key, "cobblemon.battle.swapboost.guardswap")) {
                 StateUpdater.extractSwapBoostSpecific(args, listOf(BattleStateTracker.BattleStat.DEFENSE, BattleStateTracker.BattleStat.SPECIAL_DEFENSE))
                 return
             }
-            if (key == "cobblemon.battle.activate.speedswap") {
+            if (matchesKeyVariant(key, "cobblemon.battle.activate.speedswap")) {
                 StateUpdater.extractSwapBoostSpecific(args, listOf(BattleStateTracker.BattleStat.SPEED))
                 return
             }
 
-            if (key == "cobblemon.battle.copyboost.generic") {
+            if (matchesKeyVariant(key, "cobblemon.battle.copyboost.generic")) {
                 StateUpdater.extractCopyBoost(args)
                 return
             }
@@ -478,5 +478,18 @@ object BattleMessageInterceptor {
 
     private fun isUsedMoveKey(key: String): Boolean {
         return key == USED_MOVE_KEY || key.startsWith("$USED_MOVE_KEY.")
+    }
+
+    private fun matchesKeyVariant(key: String, baseKey: String): Boolean {
+        return key == baseKey || key.startsWith("$baseKey.")
+    }
+
+    private fun matchesAnyVariant(key: String, baseKeys: Set<String>): Boolean {
+        return baseKeys.any { matchesKeyVariant(key, it) }
+    }
+
+    private fun <T> mappedKeyLookup(key: String, mapping: Map<String, T>): T? {
+        mapping[key]?.let { return it }
+        return mapping.entries.firstOrNull { matchesKeyVariant(key, it.key) }?.value
     }
 }

@@ -41,6 +41,9 @@ dependencies {
     modCompileOnly("me.shedaniel.cloth:cloth-config-fabric:${property("cloth_config_version")}") {
         exclude(group = "net.fabricmc.fabric-api")
     }
+
+    testImplementation(kotlin("test"))
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
 }
 
 tasks.processResources {
@@ -78,6 +81,13 @@ tasks.named<net.fabricmc.loom.task.RemapJarTask>("remapJar") {
     archiveFileName.set("deltacalc.jar")
 }
 
+val prismJar by tasks.registering(Copy::class) {
+    dependsOn(tasks.named<net.fabricmc.loom.task.RemapJarTask>("remapJar"))
+    from(tasks.named<net.fabricmc.loom.task.RemapJarTask>("remapJar").flatMap { it.archiveFile })
+    into(layout.buildDirectory.dir("libs"))
+    rename { "deltacalc-prism.jar" }
+}
+
 tasks.named<org.gradle.jvm.tasks.Jar>("sourcesJar") {
     archiveFileName.set("deltacalc-sources.jar")
 }
@@ -91,10 +101,12 @@ val purgePrototypeArtifacts by tasks.registering(Delete::class) {
 
 tasks.named("build") {
     dependsOn(purgePrototypeArtifacts)
+    dependsOn(prismJar)
 }
 
 tasks.named("assemble") {
     dependsOn(purgePrototypeArtifacts)
+    dependsOn(prismJar)
 }
 
 tasks.named("clean") {
@@ -104,6 +116,10 @@ tasks.named("clean") {
             include("cobblemonextendedbattleui-*.jar")
         })
     }
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 loom {

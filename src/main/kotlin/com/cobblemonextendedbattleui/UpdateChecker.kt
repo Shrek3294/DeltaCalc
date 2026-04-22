@@ -14,7 +14,6 @@ import java.time.Duration
 import java.util.concurrent.CompletableFuture
 
 object UpdateChecker {
-    private const val MODRINTH_PROJECT_SLUG = "cobblemon-extended-battle-ui"
     private const val MODRINTH_API = "https://api.modrinth.com/v2"
 
     private val httpClient = HttpClient.newBuilder()
@@ -24,6 +23,11 @@ object UpdateChecker {
     private val gson = Gson()
 
     fun checkForUpdates() {
+        if (CobblemonExtendedBattleUI.MODRINTH_PROJECT_SLUG.isBlank()) {
+            CobblemonExtendedBattleUI.LOGGER.debug("Skipping update check; no Modrinth slug configured")
+            return
+        }
+
         CompletableFuture.runAsync {
             try {
                 val currentVersion = getCurrentVersion()
@@ -61,8 +65,8 @@ object UpdateChecker {
 
     private fun fetchLatestVersion(minecraftVersion: String): String? {
         val request = HttpRequest.newBuilder()
-            .uri(URI.create("$MODRINTH_API/project/$MODRINTH_PROJECT_SLUG/version"))
-            .header("User-Agent", "CobblemonExtendedBattleUI/$currentVersionForUserAgent")
+            .uri(URI.create("$MODRINTH_API/project/${CobblemonExtendedBattleUI.MODRINTH_PROJECT_SLUG}/version"))
+            .header("User-Agent", "${CobblemonExtendedBattleUI.DISPLAY_NAME}/$currentVersionForUserAgent")
             .timeout(Duration.ofSeconds(10))
             .GET()
             .build()
@@ -115,7 +119,7 @@ object UpdateChecker {
                 SystemToast.create(
                     client,
                     SystemToast.Type.PERIODIC_NOTIFICATION,
-                    Text.literal("Extended Battle UI Update"),
+                    Text.literal("${CobblemonExtendedBattleUI.DISPLAY_NAME} update"),
                     Text.literal("Version $newVersion is available!")
                 )
             )

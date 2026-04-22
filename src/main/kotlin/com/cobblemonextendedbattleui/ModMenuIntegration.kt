@@ -5,6 +5,7 @@ import com.terraformersmc.modmenu.api.ModMenuApi
 import me.shedaniel.clothconfig2.api.ConfigBuilder
 import net.minecraft.client.gui.screen.Screen
 import net.minecraft.text.Text
+import com.cobblemonextendedbattleui.ui.calc.CalcPanelState
 
 /**
  * Mod Menu integration for config screen.
@@ -58,6 +59,32 @@ class ModMenuIntegration : ModMenuApi {
                 .setDefaultValue(true)
                 .setTooltip(Text.translatable("cobblemonextendedbattleui.config.enableBattleInfoPanel.tooltip"))
                 .setSaveConsumer { value -> PanelConfig.setEnableBattleInfoPanel(value) }
+                .build()
+        )
+
+        general.addEntry(
+            entryBuilder.startFloatField(
+                Text.translatable("cobblemonextendedbattleui.config.battleInfoFontScale"),
+                PanelConfig.fontScale
+            )
+                .setDefaultValue(1.0f)
+                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.battleInfoFontScale.tooltip"))
+                .setMin(PanelConfig.MIN_FONT_SCALE)
+                .setMax(PanelConfig.MAX_FONT_SCALE)
+                .setSaveConsumer { value -> PanelConfig.setFontScale(value) }
+                .build()
+        )
+
+        general.addEntry(
+            entryBuilder.startFloatField(
+                Text.translatable("cobblemonextendedbattleui.config.damageCalcFontScale"),
+                CalcPanelState.fontScale
+            )
+                .setDefaultValue(1.0f)
+                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.damageCalcFontScale.tooltip"))
+                .setMin(CalcPanelState.MIN_FONT_SCALE)
+                .setMax(CalcPanelState.MAX_FONT_SCALE)
+                .setSaveConsumer { value -> CalcPanelState.setFontScale(value) }
                 .build()
         )
 

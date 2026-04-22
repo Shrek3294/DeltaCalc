@@ -2,6 +2,7 @@ package com.cobblemonextendedbattleui
 
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
+import com.cobblemonextendedbattleui.ui.calc.CalcPanelState
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.MinecraftClient
 import java.io.File
@@ -336,6 +337,10 @@ object PanelConfig {
         fontScale = (fontScale + delta).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
     }
 
+    fun setFontScale(value: Float) {
+        fontScale = value.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+    }
+
     fun getMinWidth(): Int = DEFAULT_WIDTH / 2  // ~100px minimum
 
     fun getMinHeight(): Int = 60  // Just enough for header
@@ -483,7 +488,7 @@ object PanelConfig {
      * Needed for both battle info panel (weather, terrain, conditions, stats)
      * and team indicator tooltips (stat changes, volatile statuses).
      */
-    fun needsBattleStateTracking(): Boolean = enableBattleInfoPanel || enableTeamIndicators
+    fun needsBattleStateTracking(): Boolean = enableBattleInfoPanel || enableTeamIndicators || CalcPanelState.enabled
 
     /**
      * Returns true if DamageTracker should track HP changes.

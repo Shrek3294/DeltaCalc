@@ -9,6 +9,8 @@ import com.cobblemon.mod.common.client.battle.ClientBattlePokemon
 import com.cobblemon.mod.common.client.battle.ClientBattleSide
 import com.cobblemon.mod.common.pokemon.FormData
 import com.cobblemon.mod.common.pokemon.Pokemon
+import com.cobblemonextendedbattleui.compat.delta.DeltaBattleInfoReader
+import com.cobblemonextendedbattleui.compat.delta.DeltaTeamPreviewEntry
 import com.cobblemonextendedbattleui.pokemon.render.PokemonModelRenderer
 import com.cobblemonextendedbattleui.pokemon.render.TeamPanelRenderer
 import com.cobblemonextendedbattleui.pokemon.tooltip.MoveInfo
@@ -85,12 +87,17 @@ object TeamIndicatorUI {
         var originalAspects: Set<String> = emptySet(),
         var isTransformed: Boolean = false,
         var form: FormData? = null,
-        var teraType: TeraType? = null
+        var teraType: TeraType? = null,
+        var previewRevealedMoves: MutableSet<String> = linkedSetOf(),
+        var previewRevealedItem: String? = null,
+        var previewRevealedAbility: String? = null
     )
 
     // Track Pokemon for both sides separately (for spectating and opponent tracking)
     private val trackedSide1Pokemon = ConcurrentHashMap<UUID, TrackedPokemon>()
     private val trackedSide2Pokemon = ConcurrentHashMap<UUID, TrackedPokemon>()
+    private val trackedSide1Order = mutableListOf<UUID>()
+    private val trackedSide2Order = mutableListOf<UUID>()
 
     // Persistent KO tracking - Pokemon removed from activePokemon after fainting
     // still need to show as KO'd in pokeball indicators
@@ -105,6 +112,34 @@ object TeamIndicatorUI {
     private val previouslyActiveUuids = ConcurrentHashMap<Boolean, MutableSet<UUID>>()
 
     private var lastBattleId: UUID? = null
+    private var deltaPreviewCompatNote: String? = null
+    private var deltaPreviewSuccessLogged = false
+    private var deltaPreviewFallbackLogged = false
+
+    data class CalcTrackedPokemonSnapshot(
+        val uuid: UUID,
+        val displayName: String?,
+        val speciesIdentifier: Identifier?,
+        val formName: String?,
+        val formTypeNames: List<String>,
+        val formBaseStats: List<Int>,
+        val hpPercent: Float,
+        val isKO: Boolean,
+        val statusName: String?,
+        val revealedMoves: List<String>,
+        val revealedItem: String?,
+        val revealedAbility: String?,
+        val statStages: Map<String, Int>
+    )
+
+    private data class BattleContext(
+        val battle: com.cobblemon.mod.common.client.battle.ClientBattle,
+        val leftSide: ClientBattleSide,
+        val rightSide: ClientBattleSide,
+        val playerTeam: List<Pokemon>?,
+        val playerOnLeft: Boolean,
+        val playerOnRight: Boolean
+    )
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Hover Tooltip Support
@@ -212,7 +247,9 @@ object TeamIndicatorUI {
         return SpeedRangeResult(result.minSpeed, result.maxSpeed, result.abilityNote, result.itemNote)
     }
 
-    fun getActiveOpponentRevealedMoves(): Set<String> {
+    fun currentPreviewCompatNote(): String? = deltaPreviewCompatNote
+
+    fun getActiveOpponentRevealedMoves(uuid: UUID? = null): Set<String> {
         val battle = CobblemonClient.battle ?: return emptySet()
         val playerUUID = MinecraftClient.getInstance().player?.uuid ?: return emptySet()
         val playerInSide1 = battle.side1.actors.any { it.uuid == playerUUID }
@@ -229,6 +266,9 @@ object TeamIndicatorUI {
 
         return activeOpponentUuids
             .flatMap { activeUuid ->
+                if (uuid != null && activeUuid != uuid) {
+                    return@flatMap emptyList()
+                }
                 val trackedUuid = opponentTrackedMap[activeUuid]?.uuid ?: activeUuid
                 BattleStateTracker.getRevealedMoves(trackedUuid)
             }
@@ -246,6 +286,8 @@ object TeamIndicatorUI {
     fun clear() {
         trackedSide1Pokemon.clear()
         trackedSide2Pokemon.clear()
+        trackedSide1Order.clear()
+        trackedSide2Order.clear()
         knockedOutPokemon.clear()
         pendingTransforms.clear()
         previouslyActiveUuids.clear()
@@ -258,6 +300,17 @@ object TeamIndicatorUI {
         wasIncreaseFontKeyPressed = false
         wasDecreaseFontKeyPressed = false
         lastBattleId = null
+        deltaPreviewCompatNote = null
+        deltaPreviewSuccessLogged = false
+        deltaPreviewFallbackLogged = false
+    }
+
+    fun getOrderedOpponentTeamForCalc(): List<CalcTrackedPokemonSnapshot> {
+        val battleContext = syncBattleTracking() ?: return emptyList()
+        val activeOpponentUuids = battleContext.rightSide.activeClientBattlePokemon
+            .mapNotNull { it.battlePokemon?.uuid }
+            .toSet()
+        return orderedTrackedSnapshots(trackedSide2Pokemon, trackedSide2Order, activeOpponentUuids)
     }
 
     /**
@@ -672,79 +725,65 @@ object TeamIndicatorUI {
         }
     }
 
-    fun render(context: DrawContext) {
-        val battle = CobblemonClient.battle ?: return
+    private fun syncBattleTracking(): BattleContext? {
+        val battle = CobblemonClient.battle ?: return null
+        val mc = MinecraftClient.getInstance()
+        val player = mc.player ?: return null
+        val playerUUID = player.uuid
 
-        // Track minimized state - render greyed out instead of hiding
         isMinimised = battle.minimised
 
-        // Clear tracking if this is a new battle
         if (lastBattleId != battle.battleId) {
             clear()
             lastBattleId = battle.battleId
         }
 
-        // Clear pokeball bounds for this frame
-        pokeballBounds.clear()
-
-        val mc = MinecraftClient.getInstance()
-        val screenWidth = mc.window.scaledWidth
-        val player = mc.player ?: return
-        val playerUUID = player.uuid
-
-        // Get mouse position for hover detection
-        val mouseX = (mc.mouse.x * mc.window.scaledWidth / mc.window.width).toInt()
-        val mouseY = (mc.mouse.y * mc.window.scaledHeight / mc.window.height).toInt()
-
-        // Determine if player is in the battle and which side they're on
         val playerInSide1 = battle.side1.actors.any { it.uuid == playerUUID }
         val playerInSide2 = battle.side2.actors.any { it.uuid == playerUUID }
         val isSpectating = !playerInSide1 && !playerInSide2
 
-        // Debug logging for spectator mode to help diagnose flip issues
-        if (isSpectating && lastBattleId != battle.battleId) {
-            val side1Names = battle.side1.actors.map { it.displayName.string }
-            val side2Names = battle.side2.actors.map { it.displayName.string }
-            CobblemonExtendedBattleUI.LOGGER.debug(
-                "TeamIndicatorUI: Spectating - battle.side1: $side1Names, battle.side2: $side2Names (side2 on LEFT)"
-            )
-        }
-
-        // Cobblemon's BattleOverlay swaps sides based on player presence:
-        // - If player is in side1: side1 is LEFT, side2 is RIGHT
-        // - If player is in side2: side2 is LEFT, side1 is RIGHT
-        // - If spectating: side2 is LEFT, side1 is RIGHT
-        // We must match this positioning for team preview to align with the battle tiles.
         val leftSide = when {
             playerInSide1 -> battle.side1
             playerInSide2 -> battle.side2
-            else -> battle.side2  // When spectating, side2 is on LEFT
+            else -> battle.side2
         }
         val rightSide = if (leftSide == battle.side1) battle.side2 else battle.side1
 
-        // Update tracked Pokemon for both sides from battle data
-        // When spectating, neither side is considered "player's side"
-        val leftSideIsPlayer = !isSpectating  // Left side is player's side when not spectating
-        updateTrackedPokemonForSide(leftSide, trackedSide1Pokemon, isLeftSide = true, isPlayerSide = leftSideIsPlayer)
-        updateTrackedPokemonForSide(rightSide, trackedSide2Pokemon, isLeftSide = false, isPlayerSide = false)
+        val leftPreview = if (isSpectating) {
+            DeltaBattleInfoReader.teamPreviewForSide(
+                actorUuids = leftSide.actors.map { it.uuid }.toSet(),
+                activePokemonUuids = leftSide.activeClientBattlePokemon.mapNotNull { it.battlePokemon?.uuid }.toSet()
+            )
+        } else {
+            null
+        }
+        val rightPreview = DeltaBattleInfoReader.teamPreviewForSide(
+            actorUuids = rightSide.actors.map { it.uuid }.toSet(),
+            activePokemonUuids = rightSide.activeClientBattlePokemon.mapNotNull { it.battlePokemon?.uuid }.toSet()
+        )
 
-        // Check for transformed Pokemon that switched out (no longer active)
-        // This is needed because switch messages only contain the INCOMING Pokemon name,
-        // not the outgoing one, so we detect switch-out by checking active status
+        if (leftPreview != null && leftPreview.entries.isNotEmpty()) {
+            seedTrackedPokemonFromPreview(leftPreview.entries, trackedSide1Pokemon, trackedSide1Order, isAlly = false)
+        }
+        if (rightPreview.entries.isNotEmpty()) {
+            seedTrackedPokemonFromPreview(rightPreview.entries, trackedSide2Pokemon, trackedSide2Order, isAlly = false)
+        }
+
+        val leftSideIsPlayer = !isSpectating
+        updateTrackedPokemonForSide(leftSide, trackedSide1Pokemon, trackedSide1Order, isLeftSide = true, isPlayerSide = leftSideIsPlayer)
+        updateTrackedPokemonForSide(rightSide, trackedSide2Pokemon, trackedSide2Order, isLeftSide = false, isPlayerSide = false)
         checkForSwitchedOutTransforms(leftSide, rightSide)
 
-        // Count active Pokemon for positioning (determines how many tiles are shown)
-        val leftActiveCount = leftSide.actors.sumOf { it.activePokemon.size }
-        val rightActiveCount = rightSide.actors.sumOf { it.activePokemon.size }
+        val previewResults = listOfNotNull(leftPreview, rightPreview)
+        updateDeltaPreviewStatus(
+            targetCount = if (isSpectating) 2 else 1,
+            successCount = previewResults.count { it.entries.isNotEmpty() },
+            failureReasons = previewResults.mapNotNull { it.failureReason }.distinct()
+        )
 
-        val leftY = calculateIndicatorY(leftActiveCount)
-        val rightY = calculateIndicatorY(rightActiveCount)
-
-        // Find the player's actor if they're in the battle
         val playerActor = battle.side1.actors.find { it.uuid == playerUUID }
             ?: battle.side2.actors.find { it.uuid == playerUUID }
 
-        // Initialize PP tracking for all player's Pokemon (idempotent - only initializes once)
         playerActor?.pokemon?.forEach { pokemon ->
             BattleStateTracker.initializeMoves(
                 pokemon.uuid,
@@ -754,13 +793,221 @@ object TeamIndicatorUI {
             )
         }
 
-        // Determine if player is on the left or right side
-        val playerOnLeft = playerActor != null && leftSide.actors.any { it.uuid == playerUUID }
-        val playerOnRight = playerActor != null && rightSide.actors.any { it.uuid == playerUUID }
+        return BattleContext(
+            battle = battle,
+            leftSide = leftSide,
+            rightSide = rightSide,
+            playerTeam = playerActor?.pokemon,
+            playerOnLeft = playerActor != null && leftSide.actors.any { it.uuid == playerUUID },
+            playerOnRight = playerActor != null && rightSide.actors.any { it.uuid == playerUUID }
+        )
+    }
+
+    private fun updateDeltaPreviewStatus(targetCount: Int, successCount: Int, failureReasons: List<String>) {
+        val previewComplete = targetCount > 0 && successCount == targetCount
+        deltaPreviewCompatNote = if (previewComplete) null else failureReasons.firstOrNull()
+            ?: "Delta full team preview unavailable: using active-only tracking"
+
+        if (previewComplete && !deltaPreviewSuccessLogged) {
+            CobblemonExtendedBattleUI.LOGGER.debug("TeamIndicatorUI: Seeded Delta team preview for $successCount side(s)")
+            deltaPreviewSuccessLogged = true
+            deltaPreviewFallbackLogged = false
+        } else if (!previewComplete && !deltaPreviewFallbackLogged) {
+            CobblemonExtendedBattleUI.LOGGER.debug("TeamIndicatorUI: $deltaPreviewCompatNote")
+            deltaPreviewFallbackLogged = true
+            deltaPreviewSuccessLogged = false
+        }
+    }
+
+    private fun seedTrackedPokemonFromPreview(
+        entries: List<DeltaTeamPreviewEntry>,
+        targetMap: ConcurrentHashMap<UUID, TrackedPokemon>,
+        order: MutableList<UUID>,
+        isAlly: Boolean
+    ) {
+        entries.forEach { entry ->
+            registerTrackedAliases(entry, isAlly)
+            targetMap.compute(entry.uuid) { _, existing ->
+                if (entry.uuid !in order) {
+                    order += entry.uuid
+                }
+
+                if (existing != null) {
+                    existing.displayName = existing.displayName ?: entry.displayName
+                    existing.speciesIdentifier = existing.speciesIdentifier ?: entry.speciesIdentifier
+                    existing.aspects = if (existing.aspects.isEmpty()) entry.aspects else existing.aspects
+                    existing.originalSpeciesIdentifier = existing.originalSpeciesIdentifier ?: entry.speciesIdentifier
+                    existing.originalAspects = if (existing.originalAspects.isEmpty()) entry.aspects else existing.originalAspects
+                    existing.form = existing.form ?: resolvePreviewForm(entry)
+                    existing.previewRevealedMoves.addAll(entry.revealedMoves)
+                    existing.previewRevealedItem = existing.previewRevealedItem ?: entry.revealedItem
+                    existing.previewRevealedAbility = existing.previewRevealedAbility ?: entry.revealedAbility
+                    existing
+                } else {
+                    TrackedPokemon(
+                        uuid = entry.uuid,
+                        hpPercent = 1f,
+                        status = null,
+                        isKO = knockedOutPokemon.contains(entry.uuid),
+                        displayName = entry.displayName,
+                        speciesIdentifier = entry.speciesIdentifier,
+                        aspects = entry.aspects,
+                        originalSpeciesIdentifier = entry.speciesIdentifier,
+                        originalAspects = entry.aspects,
+                        isTransformed = false,
+                        form = resolvePreviewForm(entry),
+                        previewRevealedMoves = entry.revealedMoves.toCollection(linkedSetOf()),
+                        previewRevealedItem = entry.revealedItem,
+                        previewRevealedAbility = entry.revealedAbility
+                    )
+                }
+            }
+        }
+    }
+
+    private fun registerTrackedAliases(entry: DeltaTeamPreviewEntry, isAlly: Boolean) {
+        BattleStateTracker.registerSpeciesId(entry.uuid, entry.speciesIdentifier)
+        BattleStateTracker.registerPokemon(entry.uuid, entry.displayName, isAlly)
+        BattleStateTracker.registerPokemon(entry.uuid, entry.speciesIdentifier.path, isAlly)
+        entry.formName
+            ?.takeIf { it.isNotBlank() }
+            ?.let { formName ->
+                BattleStateTracker.registerPokemon(entry.uuid, formName, isAlly)
+                BattleStateTracker.registerPokemon(entry.uuid, "${entry.speciesIdentifier.path}-$formName", isAlly)
+            }
+    }
+
+    private fun resolvePreviewForm(entry: DeltaTeamPreviewEntry): FormData? {
+        val species = PokemonSpecies.getByIdentifier(entry.speciesIdentifier) ?: return null
+        val namedForm = entry.formName?.takeIf { it.isNotBlank() }
+        if (namedForm != null) {
+            val aspectCandidates = LinkedHashSet<String>()
+            aspectCandidates += BattleStateTracker.formNameToAspects(namedForm)
+            aspectCandidates += namedForm.lowercase().replace(" ", "-")
+            aspectCandidates += namedForm.lowercase().replace(" ", "-").removePrefix(entry.speciesIdentifier.path.lowercase()).trim('-')
+
+            for (candidate in aspectCandidates) {
+                if (candidate.isBlank()) continue
+                val form = species.getForm(setOf(candidate))
+                if (form != species.standardForm || candidate == species.standardForm.aspects.firstOrNull()) {
+                    return form
+                }
+            }
+
+            return species.standardForm
+        }
+        if (entry.aspects.isNotEmpty()) {
+            val aspectForm = species.getForm(entry.aspects)
+            if (aspectForm != species.standardForm || entry.aspects == species.standardForm.aspects) {
+                return aspectForm
+            }
+        }
+
+        val formName = entry.formName?.takeIf { it.isNotBlank() } ?: return species.standardForm
+        val aspectCandidates = LinkedHashSet<String>()
+        aspectCandidates += BattleStateTracker.formNameToAspects(formName)
+        aspectCandidates += formName.lowercase().replace(" ", "-")
+        aspectCandidates += formName.lowercase().replace(" ", "-").removePrefix(entry.speciesIdentifier.path.lowercase()).trim('-')
+
+        for (candidate in aspectCandidates) {
+            if (candidate.isBlank()) continue
+            val form = species.getForm(setOf(candidate))
+            if (form != species.standardForm || candidate == species.standardForm.aspects.firstOrNull()) {
+                return form
+            }
+        }
+
+        return species.standardForm
+    }
+
+    private fun orderedTrackedSnapshots(
+        tracked: ConcurrentHashMap<UUID, TrackedPokemon>,
+        order: List<UUID>,
+        previewRevealUuids: Set<UUID>
+    ): List<CalcTrackedPokemonSnapshot> {
+        val result = mutableListOf<CalcTrackedPokemonSnapshot>()
+        val seen = HashSet<UUID>()
+
+        order.forEach { uuid ->
+            val trackedPokemon = tracked[uuid] ?: return@forEach
+            result += trackedPokemon.toCalcSnapshot(includePreviewReveals = uuid in previewRevealUuids)
+            seen += uuid
+        }
+
+        tracked.entries
+            .sortedBy { it.value.displayName.orEmpty() }
+            .forEach { (uuid, trackedPokemon) ->
+                if (seen.add(uuid)) {
+                    result += trackedPokemon.toCalcSnapshot(includePreviewReveals = uuid in previewRevealUuids)
+                }
+            }
+
+        return result
+    }
+
+    private fun TrackedPokemon.toCalcSnapshot(includePreviewReveals: Boolean): CalcTrackedPokemonSnapshot {
+        val resolvedRevealedMoves = linkedSetOf<String>().apply {
+            if (includePreviewReveals) {
+                addAll(previewRevealedMoves)
+            }
+            addAll(BattleStateTracker.getRevealedMoves(uuid))
+        }
+        return CalcTrackedPokemonSnapshot(
+            uuid = uuid,
+            displayName = displayName,
+            speciesIdentifier = speciesIdentifier,
+            formName = form?.name?.takeIf { it.isNotBlank() },
+            formTypeNames = listOfNotNull(form?.primaryType?.name, form?.secondaryType?.name),
+            formBaseStats = listOf(
+                form?.baseStats?.get(com.cobblemon.mod.common.api.pokemon.stats.Stats.HP) ?: 0,
+                form?.baseStats?.get(com.cobblemon.mod.common.api.pokemon.stats.Stats.ATTACK) ?: 0,
+                form?.baseStats?.get(com.cobblemon.mod.common.api.pokemon.stats.Stats.DEFENCE) ?: 0,
+                form?.baseStats?.get(com.cobblemon.mod.common.api.pokemon.stats.Stats.SPECIAL_ATTACK) ?: 0,
+                form?.baseStats?.get(com.cobblemon.mod.common.api.pokemon.stats.Stats.SPECIAL_DEFENCE) ?: 0,
+                form?.baseStats?.get(com.cobblemon.mod.common.api.pokemon.stats.Stats.SPEED) ?: 0
+            ),
+            hpPercent = hpPercent,
+            isKO = isKO || isPokemonKO(uuid),
+            statusName = status?.name?.path,
+            revealedMoves = resolvedRevealedMoves.toList(),
+            revealedItem = BattleStateTracker.getItem(uuid)?.takeIf { it.status == BattleStateTracker.ItemStatus.HELD }?.name
+                ?: previewRevealedItem?.takeIf { includePreviewReveals },
+            revealedAbility = BattleStateTracker.getRevealedAbility(uuid)
+                ?: previewRevealedAbility?.takeIf { includePreviewReveals },
+            statStages = BattleStateTracker.getStatChanges(uuid).mapKeys { it.key.displayName }
+        )
+    }
+
+    fun render(context: DrawContext) {
+        val battleContext = syncBattleTracking() ?: return
+
+        // Clear pokeball bounds for this frame
+        pokeballBounds.clear()
+
+        val mc = MinecraftClient.getInstance()
+        val screenWidth = mc.window.scaledWidth
+
+        // Get mouse position for hover detection
+        val mouseX = (mc.mouse.x * mc.window.scaledWidth / mc.window.width).toInt()
+        val mouseY = (mc.mouse.y * mc.window.scaledHeight / mc.window.height).toInt()
+
+        val battle = battleContext.battle
+        val leftSide = battleContext.leftSide
+        val rightSide = battleContext.rightSide
+        val playerOnLeft = battleContext.playerOnLeft
+        val playerOnRight = battleContext.playerOnRight
+        val playerTeam = battleContext.playerTeam
+
+        // Count active Pokemon for positioning (determines how many tiles are shown)
+        val leftActiveCount = leftSide.actors.sumOf { it.activePokemon.size }
+        val rightActiveCount = rightSide.actors.sumOf { it.activePokemon.size }
+
+        val leftY = calculateIndicatorY(leftActiveCount)
+        val rightY = calculateIndicatorY(rightActiveCount)
 
         // Get team sizes for position calculations
-        val leftTeamSize = if (playerOnLeft) playerActor!!.pokemon.size else trackedSide1Pokemon.size
-        val rightTeamSize = if (playerOnRight) playerActor!!.pokemon.size else trackedSide2Pokemon.size
+        val leftTeamSize = if (playerOnLeft) playerTeam?.size ?: 0 else trackedSide1Pokemon.size
+        val rightTeamSize = if (playerOnRight) playerTeam?.size ?: 0 else trackedSide2Pokemon.size
 
         // Calculate positions for left and right teams
         val (leftX, leftFinalY) = getTeamPosition(
@@ -778,12 +1025,11 @@ object TeamIndicatorUI {
 
         // Render LEFT side - player's team if they're on left, otherwise tracked
         if (playerOnLeft) {
-            // Player is on left - use battle actor's pokemon list for authoritative data
-            val playerTeam = playerActor!!.pokemon
-            renderBattleTeam(context, leftX, leftFinalY, playerTeam, isLeftSide = true)
+            playerTeam?.let {
+                renderBattleTeam(context, leftX, leftFinalY, it, isLeftSide = true)
+            }
         } else {
-            // Left side is opponent or we're spectating - use tracked Pokemon from battle data
-            val leftTeam = trackedSide1Pokemon.values.toList()
+            val leftTeam = trackedSide1Order.mapNotNull(trackedSide1Pokemon::get)
             if (leftTeam.isNotEmpty()) {
                 renderTrackedTeam(context, leftX, leftFinalY, leftTeam, isLeftSide = true)
             }
@@ -791,12 +1037,11 @@ object TeamIndicatorUI {
 
         // Render RIGHT side - player's team if they're on right, otherwise tracked
         if (playerOnRight) {
-            // Player is on right - use battle actor's pokemon list for authoritative data
-            val playerTeam = playerActor!!.pokemon
-            renderBattleTeam(context, rightX, rightFinalY, playerTeam, isLeftSide = false)
+            playerTeam?.let {
+                renderBattleTeam(context, rightX, rightFinalY, it, isLeftSide = false)
+            }
         } else {
-            // Right side is opponent or we're spectating - use tracked Pokemon from battle data
-            val rightTeam = trackedSide2Pokemon.values.toList()
+            val rightTeam = trackedSide2Order.mapNotNull(trackedSide2Pokemon::get)
             if (rightTeam.isNotEmpty()) {
                 renderTrackedTeam(context, rightX, rightFinalY, rightTeam, isLeftSide = false)
             }
@@ -1018,6 +1263,7 @@ object TeamIndicatorUI {
     private fun updateTrackedPokemonForSide(
         side: ClientBattleSide,
         tracked: ConcurrentHashMap<UUID, TrackedPokemon>,
+        order: MutableList<UUID>,
         isLeftSide: Boolean,
         isPlayerSide: Boolean = isLeftSide  // Default: left side is player's side (unless spectating)
     ) {
@@ -1027,7 +1273,7 @@ object TeamIndicatorUI {
             for (activePokemon in actor.activePokemon) {
                 val battlePokemon = activePokemon.battlePokemon ?: continue
                 currentlyActiveUuids.add(battlePokemon.uuid)
-                updateTrackedPokemonInMap(battlePokemon, tracked, isPlayerSide)
+                updateTrackedPokemonInMap(battlePokemon, tracked, order, isPlayerSide)
             }
         }
 
@@ -1129,6 +1375,56 @@ object TeamIndicatorUI {
         return Pair(customX ?: defaultX, customY ?: defaultY)
     }
 
+    private fun resolveBattlePokemonForm(
+        battlePokemon: ClientBattlePokemon,
+        speciesId: Identifier?,
+        aspects: Set<String>
+    ): FormData? {
+        val liveSpecies = runCatching { battlePokemon.species }.getOrNull()
+        val fallbackSpecies = speciesId?.let(PokemonSpecies::getByIdentifier)
+        val species = liveSpecies ?: fallbackSpecies ?: return null
+        val battleForm = runCatching { battlePokemon.species.getForm(aspects) }.getOrNull()
+        if (species.resourceIdentifier.path.equals("shaymin", ignoreCase = true)) {
+            return resolveShayminForm(species, battleForm)
+        }
+        val namedForm = battlePokemon.properties.form?.takeIf { it.isNotBlank() }
+        val explicitForm = resolveExplicitFormData(speciesId, namedForm)
+        if (!namedForm.isNullOrBlank()) {
+            return explicitForm ?: species.standardForm
+        }
+        return runCatching { species.getForm(aspects) }.getOrNull() ?: explicitForm ?: species.standardForm
+    }
+
+    private fun resolveShayminForm(
+        species: com.cobblemon.mod.common.pokemon.Species,
+        battleForm: FormData?
+    ): FormData {
+        val skyForm = runCatching { species.getForm(setOf("sky")) }.getOrNull()
+        val battleHasFlying = battleForm?.primaryType?.name == "flying" || battleForm?.secondaryType?.name == "flying"
+        return if (battleHasFlying) skyForm ?: species.standardForm else species.standardForm
+    }
+
+    private fun resolveExplicitFormData(speciesId: Identifier?, formName: String?): FormData? {
+        val rawSpeciesId = speciesId?.path ?: return null
+        val species = PokemonSpecies.getByIdentifier(speciesId) ?: return null
+        val candidates = buildList {
+            formName?.takeIf { it.isNotBlank() }?.let(::add)
+        }
+        for (candidate in candidates) {
+            val aspectCandidates = LinkedHashSet<String>()
+            aspectCandidates += BattleStateTracker.formNameToAspects(candidate)
+            aspectCandidates += candidate.lowercase().replace(" ", "-")
+            aspectCandidates += candidate.lowercase().replace(" ", "-").removePrefix(rawSpeciesId.lowercase()).trim('-')
+            for (aspect in aspectCandidates) {
+                val form = species.getForm(setOf(aspect))
+                if (form != species.standardForm || aspect == species.standardForm.aspects.firstOrNull()) {
+                    return form
+                }
+            }
+        }
+        return null
+    }
+
     /**
      * Update tracked Pokemon in the specified map.
      * Also adds to knockedOutPokemon set when HP reaches 0 for reliable KO tracking.
@@ -1137,6 +1433,7 @@ object TeamIndicatorUI {
     private fun updateTrackedPokemonInMap(
         battlePokemon: ClientBattlePokemon,
         targetMap: ConcurrentHashMap<UUID, TrackedPokemon>,
+        order: MutableList<UUID>,
         isAlly: Boolean = true
     ) {
         val uuid = battlePokemon.uuid
@@ -1153,10 +1450,10 @@ object TeamIndicatorUI {
         // Get species identifier for model rendering
         // properties.species returns a String like "pikachu", convert to Identifier
         val speciesName = battlePokemon.properties.species
-        val speciesId = speciesName?.let { Identifier.of("cobblemon", it) }
+        val speciesId = speciesName?.let { runCatching { Identifier.of("cobblemon", it) }.getOrNull() }
         val aspects = battlePokemon.state.currentAspects
         val displayName = battlePokemon.displayName.string
-        val form = battlePokemon.species.getForm(aspects)
+        val form = resolveBattlePokemonForm(battlePokemon, speciesId, aspects)
         val teraType = battlePokemon.properties.teraType?.let { TeraTypes.get(it) };
 
         // If HP is 0, add to persistent KO tracking
@@ -1184,8 +1481,8 @@ object TeamIndicatorUI {
                     BattleStateTracker.registerPokemon(uuid, "$speciesName-$formName", isAlly)
                 }
         }
-        form.name
-            .takeIf { it.isNotBlank() }
+        form?.name
+            ?.takeIf { it.isNotBlank() }
             ?.let { formLabel ->
                 BattleStateTracker.registerPokemon(uuid, formLabel, isAlly)
             }
@@ -1195,6 +1492,14 @@ object TeamIndicatorUI {
 
         targetMap.compute(uuid) { _, existing ->
             if (existing != null) {
+                if (uuid !in order) {
+                    order += uuid
+                }
+                if (hasPendingTransform && !existing.isTransformed) {
+                    existing.originalSpeciesIdentifier = existing.speciesIdentifier ?: speciesId
+                    existing.originalAspects = existing.aspects
+                    existing.isTransformed = true
+                }
                 // Update existing - also check persistent KO set
                 existing.hpPercent = hpPercent
                 existing.status = status
@@ -1205,8 +1510,13 @@ object TeamIndicatorUI {
                 // The original form is tracked separately in originalSpeciesIdentifier
                 existing.speciesIdentifier = speciesId ?: existing.speciesIdentifier
                 existing.aspects = aspects.ifEmpty { existing.aspects }
+                existing.form = form
+                existing.teraType = teraType
                 existing
             } else {
+                if (uuid !in order) {
+                    order += uuid
+                }
                 // New Pokemon revealed
                 // Check if transform was queued before we could track this Pokemon (Impostor ability)
                 val isTransformed = hasPendingTransform

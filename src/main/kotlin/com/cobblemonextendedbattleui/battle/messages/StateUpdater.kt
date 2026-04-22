@@ -4,6 +4,7 @@ import com.cobblemonextendedbattleui.BattleStateTracker
 import com.cobblemonextendedbattleui.BattleStateTracker.BattleStat
 import com.cobblemonextendedbattleui.BattleStateTracker.ItemStatus
 import com.cobblemonextendedbattleui.BattleStateTracker.VolatileStatus
+import com.cobblemonextendedbattleui.BoostTraceLog
 import com.cobblemonextendedbattleui.CobblemonExtendedBattleUI
 import com.cobblemonextendedbattleui.TeamIndicatorUI
 import net.minecraft.text.Text
@@ -38,9 +39,30 @@ object StateUpdater {
         }
 
         val pokemonName = MessageParser.extractPokemonName(args[0])
-        val stat = MessageParser.resolveStat(args[1]) ?: return
+        val stat = MessageParser.resolveStat(args[1]) ?: run {
+            BoostTraceLog.append(
+                "failed to resolve stat pokemon='$pokemonName' rawStat='${MessageParser.argToString(args[1])}' stages=$stages"
+            )
+            CobblemonExtendedBattleUI.LOGGER.warn(
+                "EBU boost trace: failed to resolve stat for pokemon='{}' rawStat='{}' stages={}",
+                pokemonName,
+                MessageParser.argToString(args[1]),
+                stages
+            )
+            return
+        }
 
         CobblemonExtendedBattleUI.LOGGER.debug("StateUpdater: $pokemonName ${stat.abbr} ${if (stages > 0) "+" else ""}$stages")
+        BoostTraceLog.append(
+            "parsed pokemon='$pokemonName' stat='${stat.name}' stages=$stages rawStat='${MessageParser.argToString(args[1])}'"
+        )
+        CobblemonExtendedBattleUI.LOGGER.info(
+            "EBU boost trace: parsed pokemon='{}' stat='{}' stages={} rawStat='{}'",
+            pokemonName,
+            stat.name,
+            stages,
+            MessageParser.argToString(args[1])
+        )
         BattleStateTracker.applyStatChange(pokemonName, stat, stages)
     }
 

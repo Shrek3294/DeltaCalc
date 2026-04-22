@@ -18,7 +18,7 @@ object CobblemonExtendedBattleUIClient : ClientModInitializer {
         private set
 
     override fun onInitializeClient() {
-        CobblemonExtendedBattleUI.LOGGER.info("Cobblemon Extended Battle UI Client initializing...")
+        CobblemonExtendedBattleUI.LOGGER.info("${CobblemonExtendedBattleUI.DISPLAY_NAME} client initializing...")
 
         BattleInfoPanel.initialize()
         DamageCalcPanel.initialize()
@@ -26,7 +26,7 @@ object CobblemonExtendedBattleUIClient : ClientModInitializer {
         registerHudRenderer()
         UpdateChecker.checkForUpdates()
 
-        CobblemonExtendedBattleUI.LOGGER.info("Cobblemon Extended Battle UI Client initialized!")
+        CobblemonExtendedBattleUI.LOGGER.info("${CobblemonExtendedBattleUI.DISPLAY_NAME} client initialized")
     }
 
     private fun registerHudRenderer() {

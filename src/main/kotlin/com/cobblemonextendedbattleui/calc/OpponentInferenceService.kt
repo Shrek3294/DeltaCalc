@@ -1,8 +1,9 @@
 package com.cobblemonextendedbattleui.calc
 
+import com.cobblemonextendedbattleui.BattleMoveSupport
+
 class OpponentInferenceService {
-    fun infer(snapshot: CalcBattleSnapshot, battleDatabase: BattleDatabase): EffectiveBattleSet {
-        val opponent = snapshot.opponentActive
+    fun infer(snapshot: CalcBattleSnapshot, opponent: CalcPokemonSnapshot?, battleDatabase: BattleDatabase): EffectiveBattleSet {
         val species = battleDatabase.findSpecies(opponent?.speciesKey, opponent?.speciesId, opponent?.speciesLabel, opponent?.displayName)
         val usage = battleDatabase.findDefaultSet(species, opponent?.speciesKey, opponent?.speciesId, opponent?.speciesLabel, opponent?.displayName)
         if (opponent == null || usage == null) {
@@ -41,11 +42,12 @@ class OpponentInferenceService {
         usage.moves.sortedByDescending { it.usagePercent }
             .filter { !it.displayName.equals("Other", ignoreCase = true) }
             .forEach { option ->
-                val key = normalizeToken(option.displayName)
+                val displayName = BattleMoveSupport.resolveDisplayName(option.displayName)
+                val key = normalizeToken(BattleMoveSupport.resolveMoveId(option.id.ifBlank { option.displayName }))
                 if (moves.size < 4 && key !in moves) {
                     moves[key] = RankedMoveSlot(
                         slot = InferenceMoveSlot(
-                            moveName = option.displayName,
+                            moveName = displayName,
                             state = InferenceValueState.GUESSED,
                             confidenceLabel = confidenceLabel(option.usagePercent)
                         ),
@@ -55,12 +57,13 @@ class OpponentInferenceService {
             }
 
         opponent.revealedMoves.forEach { revealed ->
-            val normalized = normalizeToken(revealed)
+            val displayName = BattleMoveSupport.resolveDisplayName(revealed)
+            val normalized = normalizeToken(BattleMoveSupport.resolveMoveId(revealed))
             val existing = moves[normalized]
             if (existing != null) {
                 moves[normalized] = existing.copy(
                     slot = existing.slot.copy(
-                        moveName = revealed,
+                        moveName = displayName,
                         state = InferenceValueState.REVEALED,
                         confidenceLabel = "High"
                     )
@@ -74,7 +77,7 @@ class OpponentInferenceService {
                     moves.remove(replacement)
                 }
                 moves[normalized] = RankedMoveSlot(
-                    slot = InferenceMoveSlot(revealed, InferenceValueState.REVEALED, "High"),
+                    slot = InferenceMoveSlot(displayName, InferenceValueState.REVEALED, "High"),
                     usagePercent = -1.0
                 )
             }

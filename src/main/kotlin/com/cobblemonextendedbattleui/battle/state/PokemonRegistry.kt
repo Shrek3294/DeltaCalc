@@ -37,25 +37,25 @@ object PokemonRegistry {
     }
 
     fun setPlayerNames(allyName: String, opponentName: String) {
-        allyPlayerName = allyName.lowercase()
-        opponentPlayerName = opponentName.lowercase()
+        allyPlayerName = normalizeName(allyName)
+        opponentPlayerName = normalizeName(opponentName)
         CobblemonExtendedBattleUI.LOGGER.debug("PokemonRegistry: Player names set - Ally: $allyName, Opponent: $opponentName")
     }
 
     fun registerPokemon(uuid: UUID, name: String, isAlly: Boolean) {
-        val lowerName = name.lowercase()
-        val uuidList = nameToUuids.computeIfAbsent(lowerName) { mutableListOf() }
-
-        val existingEntry = uuidList.find { it.first == uuid }
-        if (existingEntry == null) {
-            uuidList.add(Pair(uuid, isAlly))
-            CobblemonExtendedBattleUI.LOGGER.debug("PokemonRegistry: Registered '$name' (${if (isAlly) "ally" else "opponent"}) with UUID $uuid")
-        } else if (existingEntry.second != isAlly) {
-            uuidList.remove(existingEntry)
-            uuidList.add(Pair(uuid, isAlly))
+        normalizedCandidates(name).forEach { alias ->
+            val uuidList = nameToUuids.computeIfAbsent(alias) { mutableListOf() }
+            val existingEntry = uuidList.find { it.first == uuid }
+            if (existingEntry == null) {
+                uuidList.add(Pair(uuid, isAlly))
+            } else if (existingEntry.second != isAlly) {
+                uuidList.remove(existingEntry)
+                uuidList.add(Pair(uuid, isAlly))
+            }
         }
 
         uuidIsAlly[uuid] = isAlly
+        CobblemonExtendedBattleUI.LOGGER.debug("PokemonRegistry: Registered '$name' (${if (isAlly) "ally" else "opponent"}) with UUID $uuid")
     }
 
     fun isPokemonAlly(uuid: UUID): Boolean = uuidIsAlly[uuid] ?: false
@@ -125,12 +125,12 @@ object PokemonRegistry {
     }
 
     fun resolvePokemonUuids(pokemonName: String, preferAlly: Boolean? = null): List<UUID> {
-        var lookupName = pokemonName.lowercase()
+        var lookupName = pokemonName
         var ownerDeterminedSide: Boolean? = null
 
         val opposingPrefixes = listOf("the opposing ", "opposing ")
         for (prefix in opposingPrefixes) {
-            if (lookupName.startsWith(prefix)) {
+            if (lookupName.lowercase().startsWith(prefix)) {
                 lookupName = lookupName.removePrefix(prefix)
                 ownerDeterminedSide = false
                 CobblemonExtendedBattleUI.LOGGER.debug(
@@ -141,8 +141,8 @@ object PokemonRegistry {
         }
 
         if (pokemonName.contains("'s ")) {
-            val ownerName = pokemonName.substringBefore("'s ").lowercase()
-            val strippedName = pokemonName.substringAfter("'s ").lowercase()
+            val ownerName = normalizeName(pokemonName.substringBefore("'s "))
+            val strippedName = pokemonName.substringAfter("'s ")
 
             val allyName = allyPlayerName
             val oppName = opponentPlayerName
@@ -159,14 +159,15 @@ object PokemonRegistry {
                 )
             }
 
-            if (nameToUuids[lookupName] == null) {
+            if (findRegisteredEntries(lookupName).isEmpty()) {
                 lookupName = strippedName
             }
         }
 
-        val uuidList = nameToUuids[lookupName] ?: run {
+        val uuidList = findRegisteredEntries(lookupName)
+        if (uuidList.isEmpty()) {
             CobblemonExtendedBattleUI.LOGGER.debug(
-                "PokemonRegistry: Could not find Pokemon '$lookupName' (original: '$pokemonName') in registry"
+                "PokemonRegistry: Could not find Pokemon '$lookupName' (original: '$pokemonName') in registry. Tried aliases=${normalizedCandidates(lookupName)}"
             )
             return emptyList()
         }
@@ -207,5 +208,43 @@ object PokemonRegistry {
                 action(uuid)
             }
         }
+    }
+
+    private fun findRegisteredEntries(pokemonName: String): List<Pair<UUID, Boolean>> {
+        return normalizedCandidates(pokemonName)
+            .asSequence()
+            .mapNotNull { nameToUuids[it] }
+            .flatten()
+            .distinct()
+            .toList()
+    }
+
+    private fun normalizedCandidates(name: String): List<String> {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return emptyList()
+
+        val lower = trimmed.lowercase()
+        val dashed = lower.replace("_", "-").replace(" ", "-")
+        val spaced = lower.replace("-", " ").replace("_", " ")
+        val compact = normalizeName(lower)
+
+        return linkedSetOf(
+            lower,
+            dashed,
+            spaced,
+            compact
+        ).filter { it.isNotBlank() }
+    }
+
+    private fun normalizeName(name: String): String {
+        return name.lowercase()
+            .replace("the opposing ", "")
+            .replace("opposing ", "")
+            .replace(" ", "")
+            .replace("-", "")
+            .replace("_", "")
+            .replace("'", "")
+            .replace(".", "")
+            .replace(":", "")
     }
 }

@@ -1,6 +1,7 @@
 package com.cobblemonextendedbattleui.battle.state
 
 import com.cobblemonextendedbattleui.BattleStateTracker.BattleStat
+import com.cobblemonextendedbattleui.BoostTraceLog
 import com.cobblemonextendedbattleui.CobblemonExtendedBattleUI
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -20,6 +21,16 @@ object StatTracker {
     fun applyStatChange(pokemonName: String, stat: BattleStat, stages: Int, preferAlly: Boolean? = null) {
         val uuid = PokemonRegistry.resolvePokemonUuid(pokemonName, preferAlly) ?: run {
             CobblemonExtendedBattleUI.LOGGER.debug("StatTracker: Unknown Pokemon '$pokemonName' for stat change")
+            BoostTraceLog.append(
+                "failed to resolve pokemon='$pokemonName' stat='${stat.name}' stages=$stages preferAlly=$preferAlly"
+            )
+            CobblemonExtendedBattleUI.LOGGER.warn(
+                "EBU boost trace: failed to resolve pokemon='{}' stat='{}' stages={} preferAlly={}",
+                pokemonName,
+                stat.name,
+                stages,
+                preferAlly
+            )
             return
         }
 
@@ -29,6 +40,18 @@ object StatTracker {
         pokemonStats[stat] = newStage
 
         CobblemonExtendedBattleUI.LOGGER.debug("StatTracker: $pokemonName ${stat.abbr} $currentStage -> $newStage")
+        BoostTraceLog.append(
+            "applied pokemon='$pokemonName' uuid=$uuid stat='${stat.name}' $currentStage->$newStage map=${pokemonStats.filterValues { it != 0 }}"
+        )
+        CobblemonExtendedBattleUI.LOGGER.info(
+            "EBU boost trace: applied pokemon='{}' uuid={} stat='{}' {}->{} map={}",
+            pokemonName,
+            uuid,
+            stat.name,
+            currentStage,
+            newStage,
+            pokemonStats.filterValues { it != 0 }
+        )
     }
 
     fun setStatStage(pokemonName: String, stat: BattleStat, stage: Int, preferAlly: Boolean? = null) {

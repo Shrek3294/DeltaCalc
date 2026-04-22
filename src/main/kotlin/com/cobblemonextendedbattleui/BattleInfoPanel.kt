@@ -424,6 +424,15 @@ object BattleInfoPanel {
 
         for (uuid in previouslyActiveUUIDs) {
             if (uuid !in currentActiveUUIDs) {
+                val sideStillHasActive = if (BattleStateTracker.isPokemonAlly(uuid)) {
+                    allyPokemon.isNotEmpty()
+                } else {
+                    opponentPokemon.isNotEmpty()
+                }
+                if (!sideStillHasActive) {
+                    continue
+                }
+
                 val usedBatonPass = BattleStateTracker.prepareBatonPassIfUsed(uuid)
                 if (!usedBatonPass) {
                     BattleStateTracker.clearPokemonStats(uuid)

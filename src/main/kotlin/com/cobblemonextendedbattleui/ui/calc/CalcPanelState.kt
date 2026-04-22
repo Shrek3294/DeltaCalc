@@ -5,6 +5,10 @@ import net.fabricmc.loader.api.FabricLoader
 import java.io.File
 
 object CalcPanelState {
+    const val MIN_FONT_SCALE = 0.35f
+    const val MAX_FONT_SCALE = 1.6f
+    const val FONT_SCALE_STEP = 0.05f
+
     private val gson = GsonBuilder().setPrettyPrinting().create()
     private val configFile: File by lazy {
         FabricLoader.getInstance().configDir.resolve("deltacalc-calc-panel.json").toFile()
@@ -24,6 +28,10 @@ object CalcPanelState {
         private set
     var summaryExpanded: Boolean = true
         private set
+    var teamSectionCollapsed: Boolean = false
+        private set
+    var movesSectionCollapsed: Boolean = false
+        private set
     var fontScale: Float = 1.0f
         private set
 
@@ -35,6 +43,8 @@ object CalcPanelState {
         val height: Int? = null,
         val expanded: Boolean = true,
         val summaryExpanded: Boolean = true,
+        val teamSectionCollapsed: Boolean = false,
+        val movesSectionCollapsed: Boolean = false,
         val fontScale: Float = 1.0f
     )
 
@@ -49,7 +59,9 @@ object CalcPanelState {
             height = data.height
             expanded = data.expanded
             summaryExpanded = data.summaryExpanded
-            fontScale = data.fontScale.coerceIn(0.7f, 1.6f)
+            teamSectionCollapsed = data.teamSectionCollapsed
+            movesSectionCollapsed = data.movesSectionCollapsed
+            fontScale = data.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
         }
     }
 
@@ -66,6 +78,8 @@ object CalcPanelState {
                         height = height,
                         expanded = expanded,
                         summaryExpanded = summaryExpanded,
+                        teamSectionCollapsed = teamSectionCollapsed,
+                        movesSectionCollapsed = movesSectionCollapsed,
                         fontScale = fontScale
                     )
                 )
@@ -91,7 +105,19 @@ object CalcPanelState {
         summaryExpanded = !summaryExpanded
     }
 
+    fun toggleTeamSectionCollapsed() {
+        teamSectionCollapsed = !teamSectionCollapsed
+    }
+
+    fun toggleMovesSectionCollapsed() {
+        movesSectionCollapsed = !movesSectionCollapsed
+    }
+
     fun adjustFontScale(delta: Float) {
-        fontScale = (fontScale + delta).coerceIn(0.7f, 1.6f)
+        fontScale = (fontScale + delta).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+    }
+
+    fun setFontScale(value: Float) {
+        fontScale = value.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
     }
 }

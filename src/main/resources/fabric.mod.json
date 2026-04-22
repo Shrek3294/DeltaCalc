@@ -2,12 +2,13 @@
   "schemaVersion": 1,
   "id": "cobblemonextendedbattleui",
   "version": "${version}",
-  "name": "Cobblemon Extended Battle UI",
-  "description": "Customizes and enhances the Cobblemon battle UI",
-  "authors": ["sveniik"],
+  "name": "DeltaCalc",
+  "description": "Client-side damage calculator and battle overlays for Cobblemon Delta battles.",
+  "authors": ["Shrek3294"],
+  "contributors": ["sveniik"],
   "contact": {
-    "homepage": "https://modrinth.com/mod/cobblemon-extended-battle-ui",
-    "sources": "https://github.com/sveniik/CobblemonExtendedBattleUI"
+    "sources": "https://github.com/Shrek3294/DeltaCalc",
+    "issues": "https://github.com/Shrek3294/DeltaCalc/issues"
   },
   "license": "MIT",
   "icon": "assets/cobblemonextendedbattleui/icon.png",
@@ -50,7 +51,7 @@
   },
   "custom": {
     "modmenu": {
-      "update_checker": true
+      "update_checker": false
     }
   }
 }

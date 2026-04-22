@@ -10,6 +10,7 @@
     "BattleGUIMixin",
     "BattleMessagePaneMixin",
     "DeltaClientBattleMessagePaneMixin",
+    "DeltaClientBattleMessageQueueMixin",
     "BattleHealthChangeHandlerMixin",
     "BattleSwitchHandlerMixin",
     "BattleInitializeHandlerMixin",

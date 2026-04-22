@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * Intercept raw battle messages for EBU's state tracking and custom log, then prevent
  * Cobblemon's default handler from populating its own message queue when the custom log is active.
  */
-@Mixin(value = BattleMessageHandler.class, remap = false)
+@Mixin(value = BattleMessageHandler.class, priority = 2000, remap = false)
 public class BattleMessageHandlerMixin {
 
     @Inject(method = "handle", at = @At("HEAD"), cancellable = true)

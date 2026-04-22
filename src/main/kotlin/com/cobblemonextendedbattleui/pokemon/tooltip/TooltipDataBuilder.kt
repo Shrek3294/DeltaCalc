@@ -308,12 +308,19 @@ object TooltipDataBuilder {
         else null
 
         val currentFormState = BattleStateTracker.getCurrentForm(uuid)
-        val effectiveForm = if (currentFormState != null && species != null) {
-            val aspect = BattleStateTracker.formNameToAspect(currentFormState.currentForm)
-            species.getForm(setOf(aspect))
-        } else {
-            trackedPokemon?.form ?: battlePokemon?.form
+        val explicitFormName = currentFormState?.currentForm?.takeIf { it.isNotBlank() }
+            ?: clientBattlePokemon?.properties?.form?.takeIf { it.isNotBlank() }
+            ?: trackedPokemon?.form?.name?.takeIf { it.isNotBlank() }
+        val effectiveForm = when {
+            pokemonId != null && explicitFormName != null -> resolveSpeciesForm(pokemonId, explicitFormName)
+                ?: trackedPokemon?.form
+                ?: battlePokemon?.form
+            trackedPokemon?.form != null -> trackedPokemon.form
+            battlePokemon?.form != null -> battlePokemon.form
+            else -> null
         }
+        val shayminForm = resolveShayminForm(species, battlePokemon?.form ?: trackedPokemon?.form, explicitFormName)
+        val resolvedForm = shayminForm ?: effectiveForm
 
         val dynamicTypeState = BattleStateTracker.getDynamicTypes(uuid)
         val lostPrimaryType: Boolean
@@ -337,10 +344,10 @@ object TooltipDataBuilder {
             addedTypes = emptyList()
 
             primaryType = if (battlePokemon != null && currentFormState == null) battlePokemon.form.primaryType
-            else effectiveForm?.primaryType ?: species?.primaryType
+            else resolvedForm?.primaryType ?: species?.primaryType
 
             secondaryType = if (battlePokemon != null && currentFormState == null) battlePokemon.form.secondaryType
-            else effectiveForm?.secondaryType ?: species?.secondaryType
+            else resolvedForm?.secondaryType ?: species?.secondaryType
         }
 
         val teraType = if (battlePokemon != null) battlePokemon.teraType
@@ -373,7 +380,7 @@ object TooltipDataBuilder {
             primaryType = primaryType,
             secondaryType = secondaryType,
             teraType = teraType,
-            form = effectiveForm,
+            form = resolvedForm,
             lostPrimaryType = lostPrimaryType,
             addedTypes = addedTypes,
             isTerastallized = isTerastallized,
@@ -404,6 +411,40 @@ object TooltipDataBuilder {
         val name: String,
         val displayName: String
     )
+
+    private fun resolveSpeciesForm(speciesId: Identifier, formName: String): com.cobblemon.mod.common.pokemon.FormData? {
+        val species = PokemonSpecies.getByIdentifier(speciesId) ?: return null
+        val normalized = formName.trim()
+        if (normalized.isBlank()) return species.standardForm
+
+        val candidates = LinkedHashSet<String>()
+        candidates += BattleStateTracker.formNameToAspects(normalized)
+        candidates += normalized.lowercase().replace(" ", "-")
+        candidates += normalized.lowercase().replace(" ", "-").removePrefix(speciesId.path.lowercase()).trim('-')
+
+        for (candidate in candidates) {
+            if (candidate.isBlank()) continue
+            val form = species.getForm(setOf(candidate))
+            if (form != species.standardForm || candidate == species.standardForm.aspects.firstOrNull()) {
+                return form
+            }
+        }
+
+        return species.standardForm
+    }
+
+    private fun resolveShayminForm(
+        species: com.cobblemon.mod.common.pokemon.Species?,
+        battleForm: com.cobblemon.mod.common.pokemon.FormData?,
+        formName: String?
+    ): com.cobblemon.mod.common.pokemon.FormData? {
+        species ?: return null
+        if (!species.resourceIdentifier.path.equals("shaymin", ignoreCase = true)) return null
+
+        val skyForm = runCatching { species.getForm(setOf("sky")) }.getOrNull()
+        val battleHasFlying = battleForm?.primaryType?.name == "flying" || battleForm?.secondaryType?.name == "flying"
+        return if (battleHasFlying) skyForm ?: species.standardForm else species.standardForm
+    }
 
     private fun getClientBattlePokemonByUuid(uuid: UUID): ClientBattlePokemon? {
         val battle = CobblemonClient.battle ?: return null

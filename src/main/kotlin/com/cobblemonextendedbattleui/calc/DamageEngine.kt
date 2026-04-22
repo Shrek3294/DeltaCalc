@@ -5,22 +5,35 @@ import com.cobblemon.mod.common.api.moves.Moves
 import com.cobblemon.mod.common.api.moves.categories.DamageCategories
 import com.cobblemon.mod.common.api.types.ElementalTypes
 import com.cobblemon.mod.common.battles.ai.strongBattleAI.AIUtility
+import com.cobblemonextendedbattleui.BattleMoveSupport
 import com.cobblemonextendedbattleui.ItemPowerBoostParser
 import com.cobblemonextendedbattleui.pokemon.stats.StatCalculator
 import kotlin.math.floor
 import kotlin.math.max
 
 interface DamageEngine {
-    fun compute(snapshot: CalcBattleSnapshot, inferredSet: EffectiveBattleSet): DamageComputationResult
+    fun compute(
+        snapshot: CalcBattleSnapshot,
+        playerSnapshot: CalcPokemonSnapshot?,
+        opponentSnapshot: CalcPokemonSnapshot?,
+        inferredSet: EffectiveBattleSet,
+        playerEffectiveCurrentHp: Int,
+        emphasizeSelectedMove: Boolean
+    ): DamageComputationResult
 }
 
 object BestEffortDamageEngine : DamageEngine {
     private val neutralIvs = CalcStats(31, 31, 31, 31, 31, 31)
     private val zeroEvs = CalcStats(0, 0, 0, 0, 0, 0)
 
-    override fun compute(snapshot: CalcBattleSnapshot, inferredSet: EffectiveBattleSet): DamageComputationResult {
-        val playerSnapshot = snapshot.playerActive
-        val opponentSnapshot = snapshot.opponentActive
+    override fun compute(
+        snapshot: CalcBattleSnapshot,
+        playerSnapshot: CalcPokemonSnapshot?,
+        opponentSnapshot: CalcPokemonSnapshot?,
+        inferredSet: EffectiveBattleSet,
+        playerEffectiveCurrentHp: Int,
+        emphasizeSelectedMove: Boolean
+    ): DamageComputationResult {
         if (playerSnapshot == null || opponentSnapshot == null) {
             return DamageComputationResult(
                 yourMoves = listOf(unsupportedEstimate("No active Pokemon")),
@@ -30,6 +43,10 @@ object BestEffortDamageEngine : DamageEngine {
         }
 
         val playerCombatant = buildCombatant(playerSnapshot)
+        val playerDefenseSnapshot = playerSnapshot.copy(
+            currentHp = playerEffectiveCurrentHp.coerceIn(0, playerSnapshot.maxHp)
+        )
+        val playerDefenseCombatant = buildCombatant(playerDefenseSnapshot)
         val opponentCombatant = buildCombatant(
             snapshot = opponentSnapshot,
             assumedItem = inferredSet.item.first,
@@ -49,7 +66,7 @@ object BestEffortDamageEngine : DamageEngine {
                 attacker = playerCombatant,
                 defender = opponentCombatant,
                 context = playerContext,
-                emphasize = normalizeToken(moveRef.id) == normalizeToken(snapshot.selectedMoveName)
+                emphasize = emphasizeSelectedMove && normalizeToken(moveRef.id) == normalizeToken(snapshot.selectedMoveName)
             )
         }
 
@@ -59,7 +76,7 @@ object BestEffortDamageEngine : DamageEngine {
                 moveId = resolveMoveId(moveSlot.moveName),
                 moveDisplayName = moveSlot.moveName,
                 attacker = opponentCombatant,
-                defender = playerCombatant,
+                defender = playerDefenseCombatant,
                 context = opponentContext,
                 guessed = moveSlot.state == InferenceValueState.GUESSED
             )
@@ -182,25 +199,26 @@ object BestEffortDamageEngine : DamageEngine {
         guessed: Boolean = false,
         emphasize: Boolean = false
     ): DamageEstimate {
-        val template = resolveMoveTemplate(moveId, moveDisplayName)
-            ?: return unsupportedEstimate(moveDisplayName, "Unsupported move data", guessed, emphasize)
+        val resolvedDisplayName = BattleMoveSupport.resolveDisplayName(moveDisplayName)
+        val template = resolveMoveTemplate(moveId, resolvedDisplayName)
+            ?: return unsupportedEstimate(resolvedDisplayName, "Unsupported move data", guessed, emphasize)
 
         val blockingIssues = buildList {
             addAll(attacker.blockingIssues.map { "Attacker: $it" })
             addAll(defender.blockingIssues.map { "Defender: $it" })
         }
         if (blockingIssues.isNotEmpty()) {
-            return unsupportedEstimate(moveDisplayName, blockingIssues.first(), guessed, emphasize)
+            return unsupportedEstimate(resolvedDisplayName, blockingIssues.first(), guessed, emphasize)
         }
 
         val category = effectiveCategory(template, attacker)
         if (category == DamageCategories.STATUS) {
-            return unsupportedEstimate(moveDisplayName, "Status move", guessed, emphasize)
+            return unsupportedEstimate(resolvedDisplayName, "Status move", guessed, emphasize)
         }
 
         val moveTypeName = resolveMoveTypeName(template, attacker, context)
         val moveType = ElementalTypes.get(moveTypeName)
-            ?: return unsupportedEstimate(moveDisplayName, "Unknown move type", guessed, emphasize)
+            ?: return unsupportedEstimate(resolvedDisplayName, "Unknown move type", guessed, emphasize)
 
         val warnings = mutableListOf<String>()
         warnings += attacker.assumptionWarnings
@@ -211,7 +229,7 @@ object BestEffortDamageEngine : DamageEngine {
 
         val power = effectivePower(template, attacker, defender, context)
         if (power <= 0) {
-            return unsupportedEstimate(moveDisplayName, "No damaging power", guessed, emphasize)
+            return unsupportedEstimate(resolvedDisplayName, "No damaging power", guessed, emphasize)
         }
 
         val defenderMaxHp = resolvedMaxHp(defender)
@@ -225,7 +243,7 @@ object BestEffortDamageEngine : DamageEngine {
         if (effectiveness == 0.0) {
             return DamageEstimate(
                 moveId = moveId,
-                moveName = moveDisplayName,
+                moveName = resolvedDisplayName,
                 minDamage = 0,
                 maxDamage = 0,
                 minPercent = 0.0,
@@ -240,7 +258,7 @@ object BestEffortDamageEngine : DamageEngine {
         val attackStat = effectiveAttackStat(attacker, template, category)
         val defenseStat = effectiveDefenseStat(defender, category, context)
         if (attackStat <= 0 || defenseStat <= 0) {
-            return unsupportedEstimate(moveDisplayName, "Incomplete stats", guessed, emphasize)
+            return unsupportedEstimate(resolvedDisplayName, "Incomplete stats", guessed, emphasize)
         }
 
         val baseDamage = (((((2.0 * attacker.snapshot.level) / 5.0) + 2.0) * power * attackStat / defenseStat) / 50.0) + 2.0
@@ -250,7 +268,7 @@ object BestEffortDamageEngine : DamageEngine {
         modifier *= terrainModifier(moveTypeName, template, attacker, defender, context)
         modifier *= screenModifier(defender, category, context)
         modifier *= burnModifier(attacker, category)
-        modifier *= offensiveAbilityModifier(attacker, moveTypeName, category, context)
+        modifier *= offensiveAbilityModifier(attacker, moveTypeName, category, context, power)
         modifier *= defensiveAbilityModifier(defender, moveTypeName, category, effectiveness)
         modifier *= itemPowerModifier(attacker, moveTypeName)
 
@@ -262,7 +280,7 @@ object BestEffortDamageEngine : DamageEngine {
 
         return DamageEstimate(
             moveId = moveId,
-            moveName = moveDisplayName,
+            moveName = resolvedDisplayName,
             minDamage = minDamage,
             maxDamage = maxDamage,
             minPercent = minPercent,
@@ -275,12 +293,12 @@ object BestEffortDamageEngine : DamageEngine {
     }
 
     private fun resolveMoveTemplate(moveId: String, displayName: String): MoveTemplate? {
-        return Moves.getByName(moveId)
-            ?: Moves.getByName(normalizeToken(moveId))
-            ?: Moves.getByName(normalizeToken(displayName))
+        return (BattleMoveSupport.moveLookupCandidates(moveId) + BattleMoveSupport.moveLookupCandidates(displayName))
+            .distinct()
+            .firstNotNullOfOrNull { candidate -> Moves.getByName(candidate) }
     }
 
-    private fun resolveMoveId(displayName: String): String = normalizeToken(displayName)
+    private fun resolveMoveId(displayName: String): String = BattleMoveSupport.resolveMoveId(displayName)
 
     private fun deriveStats(base: CalcStats, level: Int, ivs: CalcStats, evs: CalcStats, nature: String): CalcStats {
         val hp = calculateHp(base.hp, level, ivs.hp, evs.hp)
@@ -340,6 +358,15 @@ object BestEffortDamageEngine : DamageEngine {
     }
 
     private fun resolveMoveTypeName(template: MoveTemplate, attacker: DamageCombatant, context: DamageContext): String {
+        BattleMoveSupport.resolveIvyCudgelTypeName(
+            moveIdOrName = template.name,
+            speciesId = attacker.snapshot.speciesId ?: attacker.snapshot.speciesKey,
+            formName = attacker.snapshot.formName,
+            heldItemName = attacker.itemName,
+            heldItemId = attacker.itemName,
+            pokemonName = attacker.snapshot.speciesLabel
+        )?.let { return it }
+
         return when (normalizeToken(template.name)) {
             "weatherball" -> when (normalizeToken(context.weather)) {
                 "rain" -> "water"
@@ -502,10 +529,12 @@ object BestEffortDamageEngine : DamageEngine {
         attacker: DamageCombatant,
         moveTypeName: String,
         category: com.cobblemon.mod.common.api.moves.categories.DamageCategory,
-        context: DamageContext
+        context: DamageContext,
+        power: Double
     ): Double {
         return when (normalizeToken(attacker.abilityName)) {
             "hugepower", "purepower" -> if (category == DamageCategories.PHYSICAL) 2.0 else 1.0
+            "technician" -> if (power > 0.0 && power <= 60.0) 1.5 else 1.0
             "guts" -> if (category == DamageCategories.PHYSICAL && attacker.snapshot.status != null) 1.5 else 1.0
             "solarpower" -> if (category == DamageCategories.SPECIAL && normalizeToken(context.weather) in setOf("harshsunlight", "sun", "sunlight")) 1.5 else 1.0
             "flareboost" -> if (category == DamageCategories.SPECIAL && normalizeToken(attacker.snapshot.status) == "burn") 1.5 else 1.0

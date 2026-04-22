@@ -656,6 +656,17 @@ object MoveTooltipRenderer {
 
     private fun getMoveEffectiveType(move: MoveTileBounds): ElementalType {
         val playerPokemon = getPlayerPartyPokemon()
+        BattleMoveSupport.resolveIvyCudgelTypeName(
+            moveIdOrName = move.moveTemplate.name,
+            speciesId = playerPokemon?.species?.resourceIdentifier?.path,
+            formName = playerPokemon?.form?.name ?: activePokemonUuid?.let { BattleStateTracker.getCurrentForm(it)?.currentForm },
+            heldItemName = getPlayerPokemonHeldItemDisplayName(),
+            heldItemId = getPlayerPokemonHeldItemShowdownName(),
+            pokemonName = playerPokemon?.species?.name
+        )?.let { typeName ->
+            ElementalTypes.get(typeName)?.let { return it }
+        }
+
         return if (playerPokemon != null) {
             move.moveTemplate.getEffectiveElementalType(playerPokemon)
         } else {
@@ -714,6 +725,11 @@ object MoveTooltipRenderer {
         }
         val registryPath = Registries.ITEM.getId(heldItem.item).path
         return registryPath.replace("_", "")
+    }
+
+    private fun getPlayerPokemonHeldItemDisplayName(): String? {
+        val heldItem = getPlayerPokemonHeldItemStack() ?: return null
+        return heldItem.name.string.takeIf { it.isNotBlank() }
     }
 
     private fun getPlayerPokemonHeldItemStack(): ItemStack? {

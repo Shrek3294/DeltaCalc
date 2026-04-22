@@ -25,11 +25,16 @@ data class CalcStatAssumptions(
 )
 
 data class CalcSideState(
-    val sideConditions: Set<String>
+    val sideConditions: Map<String, Int>
 ) {
     fun hasCondition(condition: String): Boolean {
         val needle = normalizeToken(condition)
-        return sideConditions.any { normalizeToken(it) == needle }
+        return sideConditions.any { normalizeToken(it.key) == needle }
+    }
+
+    fun layersFor(condition: String): Int {
+        val needle = normalizeToken(condition)
+        return sideConditions.entries.firstOrNull { normalizeToken(it.key) == needle }?.value ?: 0
     }
 }
 
@@ -57,8 +62,8 @@ data class CalcPokemonSnapshot(
     val canEvolve: Boolean
 ) {
     fun stageFor(statName: String): Int {
-        val needle = normalizeToken(statName)
-        return statStages.entries.firstOrNull { normalizeToken(it.key) == needle }?.value ?: 0
+        val needles = statLookupCandidates(statName)
+        return statStages.entries.firstOrNull { statLookupCandidates(it.key).any(needles::contains) }?.value ?: 0
     }
 
     fun hasType(typeName: String): Boolean {
@@ -74,6 +79,10 @@ data class CalcBattleSnapshot(
     val terrain: String?,
     val playerSide: CalcSideState,
     val opponentSide: CalcSideState,
+    val playerTeam: List<CalcPokemonSnapshot>,
+    val opponentTeam: List<CalcPokemonSnapshot>,
+    val playerActiveUuid: UUID?,
+    val opponentActiveUuid: UUID?,
     val playerActive: CalcPokemonSnapshot?,
     val opponentActive: CalcPokemonSnapshot?,
     val selectedMoveName: String?,
@@ -84,12 +93,20 @@ data class CalcBattleSnapshot(
         turn.toString(),
         weather.orEmpty(),
         terrain.orEmpty(),
-        playerSide.sideConditions.sorted().joinToString("|"),
-        opponentSide.sideConditions.sorted().joinToString("|"),
+        playerSide.sideConditions.entries.sortedBy { it.key }.joinToString("|") { "${it.key}:${it.value}" },
+        opponentSide.sideConditions.entries.sortedBy { it.key }.joinToString("|") { "${it.key}:${it.value}" },
+        playerActiveUuid?.toString().orEmpty(),
+        opponentActiveUuid?.toString().orEmpty(),
+        playerTeam.joinToString("|") { it.fingerprintPart() },
+        opponentTeam.joinToString("|") { it.fingerprintPart() },
         playerActive.fingerprintPart(),
         opponentActive.fingerprintPart(),
         selectedMoveName.orEmpty()
     ).joinToString("::")
+
+    fun findPlayer(uuid: UUID?): CalcPokemonSnapshot? = playerTeam.firstOrNull { it.uuid == uuid }
+
+    fun findOpponent(uuid: UUID?): CalcPokemonSnapshot? = opponentTeam.firstOrNull { it.uuid == uuid }
 }
 
 enum class InferenceValueState {
@@ -154,12 +171,31 @@ data class CalcMoveRow(
     val emphasized: Boolean = false
 )
 
+data class CalcPreviewTab(
+    val uuid: UUID,
+    val label: String,
+    val isSelected: Boolean,
+    val isActive: Boolean,
+    val isDisabled: Boolean
+)
+
 data class CalcRenderModel(
     val snapshot: CalcBattleSnapshot,
+    val selectedPlayerUuid: UUID?,
+    val selectedOpponentUuid: UUID?,
+    val selectedPlayer: CalcPokemonSnapshot?,
+    val selectedOpponent: CalcPokemonSnapshot?,
+    val playerTabs: List<CalcPreviewTab>,
+    val opponentTabs: List<CalcPreviewTab>,
+    val matchupLabel: String,
+    val switchSummaryText: String?,
+    val hazardNoteText: String?,
+    val isPreview: Boolean,
     val opponentSet: EffectiveBattleSet,
     val yourMoves: List<CalcMoveRow>,
     val opponentMoves: List<CalcMoveRow>,
     val statusText: String,
+    val speedText: String? = null,
     val debugText: String = ""
 )
 
@@ -193,4 +229,20 @@ internal fun normalizeToken(value: String?): String {
         .replace("_", "")
         .replace("'", "")
         .replace(".", "")
+}
+
+private fun statLookupCandidates(value: String?): Set<String> {
+    val normalized = normalizeToken(value)
+    if (normalized.isBlank()) return emptySet()
+
+    return when (normalized) {
+        "atk", "attack" -> setOf("atk", "attack")
+        "def", "defense", "defence" -> setOf("def", "defense", "defence")
+        "spa", "spatk", "specialattack" -> setOf("spa", "spatk", "specialattack")
+        "spd", "spdef", "specialdefense", "specialdefence" -> setOf("spd", "spdef", "specialdefense", "specialdefence")
+        "spe", "speed" -> setOf("spe", "speed")
+        "acc", "accuracy" -> setOf("acc", "accuracy")
+        "eva", "evasion", "evasiveness" -> setOf("eva", "evasion", "evasiveness")
+        else -> setOf(normalized)
+    }
 }
