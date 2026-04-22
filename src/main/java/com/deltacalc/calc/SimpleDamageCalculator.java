@@ -29,8 +29,16 @@ public final class SimpleDamageCalculator {
         double burnModifier = "burn".equalsIgnoreCase(attacker.status()) && move.category() == MoveCategory.PHYSICAL ? 0.5 : 1.0;
         double modifier = stab * effectiveness * itemModifier * burnModifier;
 
-        int maxDamage = effectiveness == 0.0 ? 0 : (int) Math.max(1, Math.floor(base * modifier));
-        int minDamage = effectiveness == 0.0 ? 0 : (int) Math.max(1, Math.floor(base * modifier * 0.85));
+        int singleMax = effectiveness == 0.0 ? 0 : (int) Math.max(1, Math.floor(base * modifier));
+        int singleMin = effectiveness == 0.0 ? 0 : (int) Math.max(1, Math.floor(base * modifier * 0.85));
+        int maxDamage = singleMax * move.maxHits();
+        int minDamage = singleMin * move.minHits();
+        if (move.isMultiHit()) {
+            String hitLabel = move.minHits() == move.maxHits()
+                ? move.minHits() + " hits"
+                : move.minHits() + "-" + move.maxHits() + " hits";
+            warnings.add("Multi-hit (" + hitLabel + ")");
+        }
         double minPercent = roundPercent(minDamage, defender.maxHp());
         double maxPercent = roundPercent(maxDamage, defender.maxHp());
 
