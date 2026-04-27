@@ -124,15 +124,17 @@ object DamageCalcPanel {
 
         var textY = contentY + 6
         val textScale = BASE_FONT_SCALE * CalcPanelState.fontScale
+        val uiScale = CalcPanelState.fontScale
+        fun s(n: Int): Int = (n * uiScale).roundToInt().coerceAtLeast(1)
 
         // V2 matchup row — YOU / OPP with name + HP bar + HP% + speed indicator.
-        textY = drawMatchupSection(context, cellX, textY, cellW, model.selectedPlayer, model.selectedOpponent, model.speedText, textScale, compact)
+        textY = drawMatchupSection(context, cellX, textY, cellW, model.selectedPlayer, model.selectedOpponent, model.speedText, textScale, uiScale, compact)
 
         val tabAreaWidth = cellW - 12
         val summaryToggle = if (CalcPanelState.summaryExpanded) "[-]" else "[+]"
         val summaryStartY = textY
         UIUtils.drawText(context, "$summaryToggle ${model.matchupLabel}", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
-        textY += 11
+        textY += s(11)
         if (CalcPanelState.summaryExpanded) {
             if (!compact) {
                 UIUtils.drawText(
@@ -143,39 +145,39 @@ object DamageCalcPanel {
                     if (model.isPreview) V2_ACCENT_YELLOW else V2_TEXT_LABEL,
                     textScale
                 )
-                textY += 10
+                textY += s(10)
                 model.switchSummaryText?.let { switchSummary ->
                     UIUtils.drawText(context, switchSummary, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
-                    textY += 10
+                    textY += s(10)
                 }
             }
             model.hazardNoteText?.let { note ->
                 UIUtils.drawText(context, note, (cellX + 6).toFloat(), textY.toFloat(), UIUtils.color(245, 180, 120), textScale)
-                textY += 10
+                textY += s(10)
             }
             if (!compact) {
                 model.speedText?.let { speedText ->
                     UIUtils.drawText(context, speedText, (cellX + 6).toFloat(), textY.toFloat(), speedColor(speedText), textScale)
-                    textY += 10
+                    textY += s(10)
                 }
             }
             UIUtils.drawText(context, "Item: ${formatInference(model.opponentSet.item.first)}", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
-            drawStatePill(context, cellX + cellW - 34, textY - 1, model.opponentSet.item.second, textScale)
-            textY += 10
+            drawStatePill(context, cellX + cellW - s(34).coerceAtLeast(18), textY - 1, model.opponentSet.item.second, textScale, uiScale)
+            textY += s(10)
             UIUtils.drawText(context, "Ability: ${formatInference(model.opponentSet.ability.first)}", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
-            drawStatePill(context, cellX + cellW - 34, textY - 1, model.opponentSet.ability.second, textScale)
-            textY += 10
+            drawStatePill(context, cellX + cellW - s(34).coerceAtLeast(18), textY - 1, model.opponentSet.ability.second, textScale, uiScale)
+            textY += s(10)
             if (!compact) {
                 UIUtils.drawText(context, "Spread: ${model.opponentSet.spreadLabel ?: "Unknown"}", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
-                textY += 9
+                textY += s(9)
                 UIUtils.drawText(context, model.opponentSet.sourceLabel, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_LABEL, textScale)
-                textY += 10
+                textY += s(10)
             } else {
-                textY += 2
+                textY += s(2)
             }
         } else {
             UIUtils.drawText(context, model.opponentSet.sourceLabel, (cellX + 20).toFloat(), (textY - 1).toFloat(), V2_TEXT_LABEL, textScale)
-            textY += 8
+            textY += s(8)
         }
 
         lastSummaryBounds = intArrayOf(cellX, summaryStartY - 2, cellW, (textY - summaryStartY + 2).coerceAtLeast(12))
@@ -189,55 +191,55 @@ object DamageCalcPanel {
         context.fill(boxLeft, boxBot - 1, boxRight, boxBot, boxColor)
         context.fill(boxLeft, boxTop, boxLeft + 1, boxBot, boxColor)
         context.fill(boxRight - 1, boxTop, boxRight, boxBot, boxColor)
-        textY += 6
+        textY += s(6)
 
         val movesHeader = if (CalcPanelState.movesSectionCollapsed) "[+] MOVE PREDICTIONS" else "[-] MOVE PREDICTIONS"
         UIUtils.drawText(context, movesHeader, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_LABEL, textScale)
-        lastMovesHeaderBounds = intArrayOf(cellX, textY - 2, cellW, 11)
-        textY += 10
+        lastMovesHeaderBounds = intArrayOf(cellX, textY - 2, cellW, s(11).coerceAtLeast(8))
+        textY += s(10)
 
         if (!CalcPanelState.movesSectionCollapsed) {
-            val rowH = 14
+            val rowH = s(14).coerceAtLeast(7)
             val opponentHpPct = hpPercent(model.selectedOpponent)
             val playerHpPct = hpPercent(model.selectedPlayer)
 
             UIUtils.drawText(context, "YOU \u2192 OPPONENT", (cellX + 6).toFloat(), textY.toFloat(), V2_ACCENT_GREEN, textScale)
-            textY += 9
+            textY += s(9)
             // Bar under YOUR moves shows OPPONENT's HP (the side taking the hit).
             model.yourMoves.take(4).forEach { row ->
-                drawMoveRow(context, cellX + 6, textY.toFloat(), row, if (row.emphasized) V2_ACCENT_YELLOW else V2_TEXT, textScale, compact, opponentHpPct)
+                drawMoveRow(context, cellX + 6, textY.toFloat(), row, if (row.emphasized) V2_ACCENT_YELLOW else V2_TEXT, textScale, uiScale, compact, opponentHpPct)
                 textY += rowH
             }
 
-            textY += 2
+            textY += s(2)
             UIUtils.drawText(context, "OPPONENT \u2192 YOU", (cellX + 6).toFloat(), textY.toFloat(), UIUtils.color(252, 129, 129), textScale)
-            textY += 9
+            textY += s(9)
             // Bar under OPP's moves shows YOUR HP (the side taking the hit).
             model.opponentMoves.take(4).forEach { row ->
-                drawMoveRow(context, cellX + 6, textY.toFloat(), row, V2_TEXT, textScale, compact, playerHpPct)
+                drawMoveRow(context, cellX + 6, textY.toFloat(), row, V2_TEXT, textScale, uiScale, compact, playerHpPct)
                 textY += rowH
             }
         } else {
-            UIUtils.drawText(context, "Tap to expand", (cellX + 6).toFloat(), textY.toFloat() + 8, UIUtils.color(140, 150, 165), textScale)
-            textY += 16
+            UIUtils.drawText(context, "Tap to expand", (cellX + 6).toFloat(), textY.toFloat() + s(8), UIUtils.color(140, 150, 165), textScale)
+            textY += s(16)
         }
 
         // ─── Team roster at the bottom ─────────────────────────────────────
-        textY += 2
+        textY += s(2)
         UIUtils.drawPopupRowDivider(context, cellX, cellW, textY)
-        textY += 3
+        textY += s(3)
         val teamHeader = if (CalcPanelState.teamSectionCollapsed) "[+] TEAM" else "[-] TEAM"
         UIUtils.drawText(context, teamHeader, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_LABEL, textScale)
-        lastTeamHeaderBounds = intArrayOf(cellX, textY - 2, cellW, 11)
-        textY += 10
+        lastTeamHeaderBounds = intArrayOf(cellX, textY - 2, cellW, s(11).coerceAtLeast(8))
+        textY += s(10)
 
         if (!CalcPanelState.teamSectionCollapsed) {
-            lastPlayerTabBounds = drawTabs(context, cellX + 6, textY, tabAreaWidth, model.playerTabs, model.snapshot.playerTeam, textScale)
-            textY += tabBlockHeight(model.playerTabs, tabAreaWidth)
+            lastPlayerTabBounds = drawTabs(context, cellX + 6, textY, tabAreaWidth, model.playerTabs, model.snapshot.playerTeam, textScale, uiScale)
+            textY += tabBlockHeight(model.playerTabs, tabAreaWidth, uiScale)
 
             if (model.opponentTabs.size > 1) {
-                lastOpponentTabBounds = drawTabs(context, cellX + 6, textY, tabAreaWidth, model.opponentTabs, model.snapshot.opponentTeam, textScale)
-                textY += tabBlockHeight(model.opponentTabs, tabAreaWidth)
+                lastOpponentTabBounds = drawTabs(context, cellX + 6, textY, tabAreaWidth, model.opponentTabs, model.snapshot.opponentTeam, textScale, uiScale)
+                textY += tabBlockHeight(model.opponentTabs, tabAreaWidth, uiScale)
             } else {
                 lastOpponentTabBounds = emptyList()
             }
@@ -398,21 +400,27 @@ object DamageCalcPanel {
         availableWidth: Int,
         tabs: List<CalcPreviewTab>,
         team: List<CalcPokemonSnapshot>,
-        textScale: Float
+        textScale: Float,
+        uiScale: Float
     ): List<TabBounds> {
         if (tabs.isEmpty()) return emptyList()
 
+        val tabH = (TAB_HEIGHT * uiScale).roundToInt().coerceAtLeast(8)
+        val tabGap = (TAB_GAP * uiScale).roundToInt().coerceAtLeast(2)
         val hpByUuid: Map<UUID, Pair<Int, Int>> = team.associate { it.uuid to (it.currentHp to it.maxHp) }
         val columns = tabColumns(tabs.size, availableWidth)
-        val tabWidth = ((availableWidth - (columns - 1) * TAB_GAP) / columns).coerceAtLeast(TAB_MIN_WIDTH)
+        val tabWidth = ((availableWidth - (columns - 1) * tabGap) / columns).coerceAtLeast(TAB_MIN_WIDTH)
         val tabTextScale = (textScale - TAB_TEXT_SCALE_OFFSET).coerceAtLeast(TAB_TEXT_SCALE_MIN)
         val bounds = mutableListOf<TabBounds>()
+        val labelInsetX = (3 * uiScale).roundToInt().coerceAtLeast(1)
+        val labelInsetY = (3 * uiScale).roundToInt().coerceAtLeast(1)
+        val hpBarH = (2 * uiScale).roundToInt().coerceAtLeast(1)
 
         tabs.forEachIndexed { index, tab ->
             val row = index / columns
             val column = index % columns
-            val x = startX + column * (tabWidth + TAB_GAP)
-            val y = startY + row * (TAB_HEIGHT + TAB_GAP)
+            val x = startX + column * (tabWidth + tabGap)
+            val y = startY + row * (tabH + tabGap)
             val background = when {
                 tab.isDisabled -> UIUtils.color(45, 28, 32, 235)
                 tab.isSelected -> UIUtils.color(34, 68, 56, 235)
@@ -425,16 +433,18 @@ object DamageCalcPanel {
                 tab.isActive -> V2_ACCENT_BLUE
                 else -> V2_TEXT_LABEL
             }
-            context.fill(x, y, x + tabWidth, y + TAB_HEIGHT, background)
+            context.fill(x, y, x + tabWidth, y + tabH, background)
             context.fill(x, y, x + tabWidth, y + 1, accent)
 
-            // HP fill bar at bottom (2px).
+            // HP fill bar at bottom.
             val hp = hpByUuid[tab.uuid]
             if (hp != null) {
                 val max = hp.second.coerceAtLeast(1)
                 val pct = ((hp.first * 100.0) / max).coerceIn(0.0, 100.0)
                 val innerW = (tabWidth - 2).coerceAtLeast(1)
-                context.fill(x + 1, y + TAB_HEIGHT - 3, x + 1 + innerW, y + TAB_HEIGHT - 1, HP_TRACK)
+                val barTop = y + tabH - hpBarH - 1
+                val barBot = y + tabH - 1
+                context.fill(x + 1, barTop, x + 1 + innerW, barBot, HP_TRACK)
                 if (hp.first > 0) {
                     val fillW = ((innerW * pct) / 100.0).roundToInt().coerceAtLeast(1)
                     val col = when {
@@ -442,7 +452,7 @@ object DamageCalcPanel {
                         pct > 20 -> HP_MID
                         else -> HP_LOW
                     }
-                    context.fill(x + 1, y + TAB_HEIGHT - 3, x + 1 + fillW, y + TAB_HEIGHT - 1, col)
+                    context.fill(x + 1, barTop, x + 1 + fillW, barBot, col)
                 }
             }
 
@@ -454,26 +464,30 @@ object DamageCalcPanel {
             UIUtils.drawText(
                 context,
                 fitted,
-                (x + 3).toFloat(),
-                (y + 3).toFloat(),
+                (x + labelInsetX).toFloat(),
+                (y + labelInsetY).toFloat(),
                 if (tab.isDisabled) V2_TEXT_LABEL else V2_TEXT,
                 tabTextScale
             )
             // Strikethrough fainted.
             if (tab.isDisabled) {
-                context.fill(x + 2, y + 6, x + tabWidth - 2, y + 7, UIUtils.color(200, 120, 120, 200))
+                val strikeY = y + (tabH / 2)
+                context.fill(x + 2, strikeY, x + tabWidth - 2, strikeY + 1, UIUtils.color(200, 120, 120, 200))
             }
-            bounds += TabBounds(tab.uuid, x, y, tabWidth, TAB_HEIGHT, tab.isDisabled)
+            bounds += TabBounds(tab.uuid, x, y, tabWidth, tabH, tab.isDisabled)
         }
 
         return bounds
     }
 
-    private fun tabBlockHeight(tabs: List<CalcPreviewTab>, availableWidth: Int): Int {
+    private fun tabBlockHeight(tabs: List<CalcPreviewTab>, availableWidth: Int, uiScale: Float): Int {
         if (tabs.isEmpty()) return 0
+        val tabH = (TAB_HEIGHT * uiScale).roundToInt().coerceAtLeast(8)
+        val tabGap = (TAB_GAP * uiScale).roundToInt().coerceAtLeast(2)
+        val pad = (6 * uiScale).roundToInt().coerceAtLeast(2)
         val columns = tabColumns(tabs.size, availableWidth)
         val rows = ceil(tabs.size / columns.toDouble()).toInt()
-        return rows * TAB_HEIGHT + (rows - 1) * TAB_GAP + 6
+        return rows * tabH + (rows - 1) * tabGap + pad
     }
 
     private fun tabColumns(tabCount: Int, availableWidth: Int): Int {
@@ -484,19 +498,21 @@ object DamageCalcPanel {
         return tabCount.coerceAtMost(maxByWidth).coerceAtLeast(1)
     }
 
-    private fun drawMoveRow(context: DrawContext, x: Int, y: Float, row: CalcMoveRow, color: Int, scale: Float, compact: Boolean, defenderHpPct: Int) {
+    private fun drawMoveRow(context: DrawContext, x: Int, y: Float, row: CalcMoveRow, color: Int, scale: Float, uiScale: Float, compact: Boolean, defenderHpPct: Int) {
         val sevBar = severityBar(row)
         val sevFg = severityFg(row)
         val yInt = y.toInt()
+        val barYOffset = (7 * uiScale).roundToInt().coerceAtLeast(3)
+        val barWidth = (78 * uiScale).roundToInt().coerceAtLeast(20)
 
         UIUtils.drawText(context, row.moveName, x.toFloat(), y, color, scale)
-        UIUtils.drawText(context, row.damageText, (x + 84).toFloat(), y, V2_TEXT_DIM, scale)
-        UIUtils.drawText(context, row.koText, (x + 144).toFloat(), y, sevFg, scale)
+        UIUtils.drawText(context, row.damageText, x + 84f * uiScale, y, V2_TEXT_DIM, scale)
+        UIUtils.drawText(context, row.koText, x + 144f * uiScale, y, sevFg, scale)
 
         // Damage-vs-HP bar under the name (skip status / missing data). Always shown so
         // it works regardless of compact mode; compact just affects surrounding sections.
         if (!row.isStatus && row.minPercent != null && row.maxPercent != null) {
-            drawDamageBar(context, x, yInt + 7, 78, row.minPercent, row.maxPercent, defenderHpPct, sevBar)
+            drawDamageBar(context, x, yInt + barYOffset, barWidth, row.minPercent, row.maxPercent, defenderHpPct, sevBar, uiScale)
         }
     }
 
@@ -530,10 +546,11 @@ object DamageCalcPanel {
     private fun drawDamageBar(
         context: DrawContext, x: Int, y: Int, w: Int,
         minDmgPct: Double, maxDmgPct: Double,
-        defenderHpPct: Int, sevColor: Int
+        defenderHpPct: Int, sevColor: Int,
+        uiScale: Float = 1.0f
     ) {
         val width = w.coerceAtLeast(4)
-        val h = 4
+        val h = (4 * uiScale).roundToInt().coerceAtLeast(2)
         context.fill(x, y, x + width, y + h, HP_TRACK)
 
         val currentHp = defenderHpPct.coerceIn(0, 100).toDouble()
@@ -561,9 +578,10 @@ object DamageCalcPanel {
         }
     }
 
-    private fun drawHpBar(context: DrawContext, x: Int, y: Int, w: Int, pct: Double) {
+    private fun drawHpBar(context: DrawContext, x: Int, y: Int, w: Int, pct: Double, uiScale: Float = 1.0f) {
         val width = w.coerceAtLeast(4)
-        context.fill(x, y, x + width, y + 4, HP_TRACK)
+        val h = (4 * uiScale).roundToInt().coerceAtLeast(2)
+        context.fill(x, y, x + width, y + h, HP_TRACK)
         val clamped = pct.coerceIn(0.0, 100.0)
         val fill = ((width * clamped) / 100.0).roundToInt().coerceAtLeast(if (pct > 0) 1 else 0)
         val col = when {
@@ -571,7 +589,7 @@ object DamageCalcPanel {
             clamped > 20 -> HP_MID
             else -> HP_LOW
         }
-        context.fill(x, y, x + fill, y + 4, col)
+        context.fill(x, y, x + fill, y + h, col)
     }
 
     private fun drawMatchupSection(
@@ -583,8 +601,10 @@ object DamageCalcPanel {
         opponent: CalcPokemonSnapshot?,
         speedText: String?,
         textScale: Float,
+        uiScale: Float,
         compact: Boolean
     ): Int {
+        fun s(n: Int): Int = (n * uiScale).roundToInt().coerceAtLeast(1)
         val youPct = hpPercent(player)
         val oppPct = hpPercent(opponent)
         val (arrow, arrowColor) = speedArrow(speedText)
@@ -593,10 +613,10 @@ object DamageCalcPanel {
             val oppLabel = "Opp ${oppPct}%"
             val youW = (MinecraftClient.getInstance().textRenderer.getWidth(youLabel) * textScale).toInt()
             UIUtils.drawText(context, youLabel, (cellX + 6).toFloat(), (y + 1).toFloat(), V2_TEXT, textScale)
-            UIUtils.drawText(context, arrow, (cellX + 6 + youW + 4).toFloat(), (y + 1).toFloat(), arrowColor, textScale)
+            UIUtils.drawText(context, arrow, (cellX + 6 + youW + s(4)).toFloat(), (y + 1).toFloat(), arrowColor, textScale)
             val arrowW = (MinecraftClient.getInstance().textRenderer.getWidth(arrow) * textScale).toInt()
-            UIUtils.drawText(context, oppLabel, (cellX + 6 + youW + 4 + arrowW + 4).toFloat(), (y + 1).toFloat(), V2_TEXT, textScale)
-            return y + 12
+            UIUtils.drawText(context, oppLabel, (cellX + 6 + youW + s(4) + arrowW + s(4)).toFloat(), (y + 1).toFloat(), V2_TEXT, textScale)
+            return y + s(12).coerceAtLeast(7)
         }
         val colW = ((cellW - 12 - 3) / 2).coerceAtLeast(40)
         val youX = cellX + 6
@@ -605,23 +625,23 @@ object DamageCalcPanel {
         UIUtils.drawText(context, "OPP", oppX.toFloat(), y.toFloat(), V2_TEXT_LABEL, textScale)
         // Speed arrow centered between the column labels.
         val arrowW = (MinecraftClient.getInstance().textRenderer.getWidth(arrow) * textScale).toInt()
-        UIUtils.drawText(context, arrow, (cellX + 6 + colW + 3 - (arrowW / 2) - 2).toFloat(), y.toFloat(), arrowColor, textScale)
-        val nameY = y + 9
-        val nameW = (colW - 4).coerceAtLeast(20)
+        UIUtils.drawText(context, arrow, (cellX + 6 + colW + 3 - (arrowW / 2) - s(2)).toFloat(), y.toFloat(), arrowColor, textScale)
+        val nameY = y + s(9)
+        val nameW = (colW - s(4)).coerceAtLeast(s(20).coerceAtLeast(12))
         player?.let {
             UIUtils.drawText(context, truncate(it.displayName, nameW, textScale), youX.toFloat(), nameY.toFloat(), V2_TEXT, textScale)
         }
         opponent?.let {
             UIUtils.drawText(context, truncate(it.displayName, nameW, textScale), oppX.toFloat(), nameY.toFloat(), V2_TEXT, textScale)
         }
-        val hpY = y + 19
-        val barW = (colW - 24).coerceAtLeast(20)
-        drawHpBar(context, youX, hpY, barW, youPct.toDouble())
-        UIUtils.drawText(context, "${youPct}%", (youX + barW + 2).toFloat(), (hpY - 1).toFloat(), V2_TEXT_DIM, textScale)
-        drawHpBar(context, oppX, hpY, barW, oppPct.toDouble())
-        UIUtils.drawText(context, "${oppPct}%", (oppX + barW + 2).toFloat(), (hpY - 1).toFloat(), V2_TEXT_DIM, textScale)
-        UIUtils.drawPopupRowDivider(context, cellX, cellW, y + 26)
-        return y + 30
+        val hpY = y + s(19)
+        val barW = (colW - s(24)).coerceAtLeast(s(20).coerceAtLeast(12))
+        drawHpBar(context, youX, hpY, barW, youPct.toDouble(), uiScale)
+        UIUtils.drawText(context, "${youPct}%", (youX + barW + s(2)).toFloat(), (hpY - 1).toFloat(), V2_TEXT_DIM, textScale)
+        drawHpBar(context, oppX, hpY, barW, oppPct.toDouble(), uiScale)
+        UIUtils.drawText(context, "${oppPct}%", (oppX + barW + s(2)).toFloat(), (hpY - 1).toFloat(), V2_TEXT_DIM, textScale)
+        UIUtils.drawPopupRowDivider(context, cellX, cellW, y + s(26))
+        return y + s(30)
     }
 
     // Small speed indicator: ">" = you faster, "<" = opp faster, "=" = tie/unknown.
@@ -654,7 +674,7 @@ object DamageCalcPanel {
         return "$out…"
     }
 
-    private fun drawStatePill(context: DrawContext, x: Int, y: Int, state: InferenceValueState, scale: Float) {
+    private fun drawStatePill(context: DrawContext, x: Int, y: Int, state: InferenceValueState, scale: Float, uiScale: Float = 1.0f) {
         val (bg, fg, label) = when (state) {
             InferenceValueState.REVEALED -> Triple(PILL_SEEN_BG, V2_ACCENT_GREEN, "SEEN")
             InferenceValueState.GUESSED -> Triple(PILL_LIKELY_BG, V2_ACCENT_YELLOW, "LIKELY")
@@ -662,10 +682,12 @@ object DamageCalcPanel {
         }
         val pillScale = (scale - 0.15f).coerceAtLeast(0.42f)
         val tw = (MinecraftClient.getInstance().textRenderer.getWidth(label) * pillScale).toInt()
-        val pillW = tw + 6
-        val pillH = 8
+        val padX = (3 * uiScale).roundToInt().coerceAtLeast(1)
+        val padY = (1 * uiScale).roundToInt().coerceAtLeast(1)
+        val pillW = tw + padX * 2
+        val pillH = (8 * uiScale).roundToInt().coerceAtLeast(5)
         context.fill(x, y, x + pillW, y + pillH, bg)
-        UIUtils.drawText(context, label, (x + 3).toFloat(), (y + 1).toFloat(), fg, pillScale)
+        UIUtils.drawText(context, label, (x + padX).toFloat(), (y + padY).toFloat(), fg, pillScale)
     }
 
     private fun drawResizeHandle(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
