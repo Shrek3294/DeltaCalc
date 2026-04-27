@@ -11,7 +11,6 @@ data class MoveFlagEntry(
     val type: String,
     val category: String,
     val basePower: Int,
-    val accuracy: Int,
     val priority: Int,
     val flags: List<String> = emptyList(),
     val hasSecondary: Boolean = false,
@@ -20,7 +19,10 @@ data class MoveFlagEntry(
     val multihitMin: Int = 1,
     val multihitMax: Int = 1
 ) {
-    private val flagSet: Set<String> by lazy { flags.map { it.lowercase(Locale.ROOT) }.toSet() }
+    // Computed property instead of `by lazy`: Gson bypasses the constructor during
+    // deserialization, which leaves the Lazy backing field null and trips an NPE.
+    private val flagSet: Set<String>
+        get() = flags.map { it.lowercase(Locale.ROOT) }.toSet()
     fun hasFlag(name: String): Boolean = name.lowercase(Locale.ROOT) in flagSet
     val isContact: Boolean get() = hasFlag("contact")
     val isBite: Boolean get() = hasFlag("bite")

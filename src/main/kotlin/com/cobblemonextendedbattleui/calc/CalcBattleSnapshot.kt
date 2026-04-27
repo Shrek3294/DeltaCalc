@@ -177,7 +177,10 @@ data class CalcMoveRow(
     val moveName: String,
     val damageText: String,
     val koText: String,
-    val emphasized: Boolean = false
+    val emphasized: Boolean = false,
+    val minPercent: Double? = null,
+    val maxPercent: Double? = null,
+    val isStatus: Boolean = false
 )
 
 data class CalcPreviewTab(
