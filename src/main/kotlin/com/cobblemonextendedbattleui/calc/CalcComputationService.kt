@@ -133,7 +133,10 @@ object CalcComputationService {
             moveName = estimate.moveName,
             damageText = damageText,
             koText = estimate.koLabel,
-            emphasized = estimate.emphasized
+            emphasized = estimate.emphasized,
+            minPercent = estimate.minPercent,
+            maxPercent = estimate.maxPercent,
+            isStatus = estimate.koLabel.equals("status", ignoreCase = true)
         )
     }
 
@@ -259,13 +262,9 @@ object CalcComputationService {
     }
 
     private fun tabLabel(pokemon: CalcPokemonSnapshot): String {
-        val raw = pokemon.speciesLabel.ifBlank { pokemon.displayName }
-        return raw
-            .split("-", " ")
-            .firstOrNull()
-            ?.take(8)
-            ?.ifBlank { raw.take(8) }
-            ?: raw.take(8)
+        // Return the full species label (or display name). The UI decides how
+        // much fits and truncates based on actual tab width.
+        return pokemon.speciesLabel.ifBlank { pokemon.displayName }
     }
 
     private fun resolveOpponentSpeedRange(opponent: CalcPokemonSnapshot): TeamIndicatorUI.SpeedRangeResult? {
