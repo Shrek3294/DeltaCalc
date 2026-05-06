@@ -346,7 +346,8 @@ object BattleStateFacade {
 
     private val REGIONAL_ASPECTS = listOf("galar", "alola", "hisui", "paldea")
 
-    private fun splitRegionalForm(species: String): Pair<String, String?> {
+    private fun splitRegionalForm(species: String?): Pair<String?, String?> {
+        if (species == null) return null to null
         if (species.startsWith("delta:", ignoreCase = true)) return species to null
         for (aspect in REGIONAL_ASPECTS) {
             val suffix = "-$aspect"
