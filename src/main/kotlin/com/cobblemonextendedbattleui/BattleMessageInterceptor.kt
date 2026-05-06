@@ -97,12 +97,14 @@ object BattleMessageInterceptor {
                 val pokemonName = MessageParser.argToString(args[0])
                 val abilityName = MessageParser.argToString(args[1])
                 BattleStateTracker.setRevealedAbility(pokemonName, abilityName)
+                maybeApplyEmbodyAspect(pokemonName, abilityName)
             }
 
             TranslationKeys.ABILITY_SINGLE_ARG_KEYS[key]?.let { abilityName ->
                 if (args.isNotEmpty()) {
                     val pokemonName = MessageParser.argToString(args[0])
                     BattleStateTracker.setRevealedAbility(pokemonName, abilityName)
+                    maybeApplyEmbodyAspect(pokemonName, abilityName)
                 }
             }
 
@@ -491,5 +493,38 @@ object BattleMessageInterceptor {
     private fun <T> mappedKeyLookup(key: String, mapping: Map<String, T>): T? {
         mapping[key]?.let { return it }
         return mapping.entries.firstOrNull { matchesKeyVariant(key, it.key) }?.value
+    }
+
+    /**
+     * Ogerpon's Embody Aspect grants a passive +1 stat boost on switch-in,
+     * varying by mask. Cobblemon emits the ability via ABILITY_GENERIC_KEY /
+     * ABILITY_SINGLE_ARG_KEYS without a separate boost message, so the boost
+     * has to be applied here. Strictly gated on species == ogerpon to prevent
+     * Trace/Receiver copying onto a non-Ogerpon from triggering. clearPokemonState
+     * zeros stages on switch-out, so seeing the slot already at +1 means the
+     * ability message re-emitted within one switch — skip to avoid double-boost.
+     */
+    private fun maybeApplyEmbodyAspect(pokemonName: String, abilityName: String) {
+        val normalized = abilityName.lowercase().replace(" ", "").replace("_", "").replace("-", "")
+        if (normalized != "embodyaspect") return
+        val speciesId = BattleStateTracker.getSpeciesIdByName(pokemonName)?.path ?: return
+        if (!speciesId.startsWith("ogerpon", ignoreCase = true)) return
+
+        val formName = BattleStateTracker.getCurrentFormByName(pokemonName)?.currentForm.orEmpty()
+        val tokens = "$speciesId-$formName".lowercase()
+        val stat = when {
+            "hearthflame" in tokens -> BattleStateTracker.BattleStat.ATTACK
+            "wellspring" in tokens -> BattleStateTracker.BattleStat.SPECIAL_DEFENSE
+            "cornerstone" in tokens -> BattleStateTracker.BattleStat.DEFENSE
+            else -> BattleStateTracker.BattleStat.SPEED
+        }
+
+        val current = BattleStateTracker.getStatChangesByName(pokemonName)[stat] ?: 0
+        if (current >= 1) return
+
+        BattleStateTracker.applyStatChange(pokemonName, stat, 1)
+        CobblemonExtendedBattleUI.LOGGER.debug(
+            "BattleMessageInterceptor: Embody Aspect on $pokemonName -> +1 ${stat.abbr}"
+        )
     }
 }
