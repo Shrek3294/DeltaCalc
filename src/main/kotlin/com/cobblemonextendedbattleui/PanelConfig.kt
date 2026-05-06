@@ -29,7 +29,8 @@ object PanelConfig {
         private set
 
     // Enable/disable the custom battle log (replaces Cobblemon's chat-based log)
-    var enableBattleLog: Boolean = true
+    // Default off so new installs aren't bombarded with panes — opt in via mod menu.
+    var enableBattleLog: Boolean = false
         private set
 
     // Enable/disable move tooltips on Fight menu (shows power, accuracy, effectiveness)
@@ -188,7 +189,7 @@ object PanelConfig {
         // Feature toggles
         val enableTeamIndicators: Boolean = true,
         val enableBattleInfoPanel: Boolean = true,
-        val enableBattleLog: Boolean = true,
+        val enableBattleLog: Boolean = false,
         val enableMoveTooltips: Boolean = true,
         // Panel settings
         val panelX: Int? = null,

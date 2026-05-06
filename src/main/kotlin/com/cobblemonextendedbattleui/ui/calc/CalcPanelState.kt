@@ -14,7 +14,10 @@ object CalcPanelState {
         FabricLoader.getInstance().configDir.resolve("deltacalc-calc-panel.json").toFile()
     }
 
-    var enabled: Boolean = true
+    // Default off so a fresh install doesn't drop a calc panel on top of a
+    // brand-new user's screen — they opt in via mod menu / hotkey. Existing
+    // users keep their saved state via load().
+    var enabled: Boolean = false
         private set
     var x: Int? = null
         private set
@@ -36,7 +39,7 @@ object CalcPanelState {
         private set
 
     data class ConfigData(
-        val enabled: Boolean = true,
+        val enabled: Boolean = false,
         val x: Int? = null,
         val y: Int? = null,
         val width: Int? = null,
