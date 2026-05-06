@@ -71,6 +71,25 @@ object StatTracker {
         clearPokemonStats(uuid)
     }
 
+    fun clearNegativeStages(uuid: UUID) {
+        val stats = statChanges[uuid] ?: return
+        var cleared = 0
+        stats.entries.forEach { (stat, value) ->
+            if (value < 0) {
+                stats[stat] = 0
+                cleared++
+            }
+        }
+        if (cleared > 0) {
+            CobblemonExtendedBattleUI.LOGGER.debug("StatTracker: Cleared $cleared negative stage(s) for UUID $uuid (White Herb)")
+        }
+    }
+
+    fun clearNegativeStagesByName(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = PokemonRegistry.resolvePokemonUuid(pokemonName, preferAlly) ?: return
+        clearNegativeStages(uuid)
+    }
+
     fun clearAllStatsForAll() {
         statChanges.values.forEach { it.clear() }
         CobblemonExtendedBattleUI.LOGGER.debug("StatTracker: Cleared all stats for all Pokemon (Haze)")

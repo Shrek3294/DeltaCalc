@@ -234,6 +234,9 @@ object StateUpdater {
         val pokemonName = MessageParser.argToString(args[0])
         val itemName = MessageParser.argToString(args[1])
         BattleStateTracker.setItem(pokemonName, itemName, ItemStatus.CONSUMED)
+        if (itemName.lowercase().replace(" ", "").replace("_", "") == "whiteherb") {
+            BattleStateTracker.clearNegativeStagesByName(pokemonName)
+        }
     }
 
     fun extractItemConsumedSingleArg(args: Array<out Any>, itemName: String) {
