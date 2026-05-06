@@ -170,11 +170,12 @@ object DamageCalcPanel {
                 UIUtils.drawText(context, note, (cellX + 6).toFloat(), textY.toFloat(), UIUtils.color(245, 180, 120), textScale)
                 textY += s(10)
             }
-            if (!compact) {
-                model.speedText?.let { speedText ->
-                    UIUtils.drawText(context, speedText, (cellX + 6).toFloat(), textY.toFloat(), speedColor(speedText), textScale)
-                    textY += s(10)
-                }
+            // Speed line shows in both compact and full modes so users can tell
+            // at a glance whether overrides moved the speed comparison. The
+            // speedText already starts with "Speed: ..." so no extra label needed.
+            model.speedText?.let { speedText ->
+                UIUtils.drawText(context, speedText, (cellX + 6).toFloat(), textY.toFloat(), speedColor(speedText), textScale)
+                textY += s(10)
             }
             val opponentUuid = model.selectedOpponentUuid
             val itemOverridden = opponentUuid?.let { CalcComputationService.hasOverride(it, OverrideRow.ITEM) } ?: false

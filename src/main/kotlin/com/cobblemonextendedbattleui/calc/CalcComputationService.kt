@@ -1,5 +1,7 @@
 package com.cobblemonextendedbattleui.calc
 
+import com.cobblemon.mod.common.api.pokemon.PokemonSpecies
+import com.cobblemon.mod.common.api.pokemon.stats.Stats
 import com.cobblemon.mod.common.api.pokemon.status.Status
 import com.cobblemon.mod.common.api.pokemon.status.Statuses
 import com.cobblemon.mod.common.api.types.ElementalTypes
@@ -52,13 +54,19 @@ object CalcComputationService {
             val selectedPlayer = snapshot.findPlayer(selection.playerUuid) ?: snapshot.playerActive
             val selectedOpponent = snapshot.findOpponent(selection.opponentUuid) ?: snapshot.opponentActive
             val inferredSet = inferenceService.infer(snapshot, selectedOpponent, battleDatabase)
-            val effectiveSet = applyOverride(inferredSet, selectedOpponent)
+            val overrideMerged = applyOverride(inferredSet, selectedOpponent)
+            // When the effective item is a mega stone, swap the opponent's
+            // species data to its mega form so damage / speed / types reflect
+            // post-mega stats, even when the in-battle mega evolution hasn't
+            // fired yet. Re-points effectiveSet's ability at the mega form's
+            // intrinsic ability when the user hasn't overridden it.
+            val (effectiveOpponent, effectiveSet) = applyMegaFormSwap(selectedOpponent, overrideMerged)
             val reasons = invalidationCoordinator.consumeReasons()
             val switchPreview = buildSwitchPreview(selectedPlayer, snapshot)
             val damageResult = damageEngine.compute(
                 snapshot = snapshot,
                 playerSnapshot = selectedPlayer,
-                opponentSnapshot = selectedOpponent,
+                opponentSnapshot = effectiveOpponent,
                 inferredSet = effectiveSet,
                 playerEffectiveCurrentHp = switchPreview.effectiveCurrentHp,
                 emphasizeSelectedMove = selectedPlayer?.uuid == snapshot.playerActiveUuid
@@ -87,10 +95,10 @@ object CalcComputationService {
                 selectedPlayerUuid = selectedPlayer?.uuid,
                 selectedOpponentUuid = selectedOpponent?.uuid,
                 selectedPlayer = selectedPlayer,
-                selectedOpponent = selectedOpponent,
+                selectedOpponent = effectiveOpponent,
                 playerTabs = buildTabs(snapshot.playerTeam, selectedPlayer?.uuid, snapshot.playerActiveUuid),
                 opponentTabs = buildTabs(snapshot.opponentTeam, selectedOpponent?.uuid, snapshot.opponentActiveUuid),
-                matchupLabel = buildMatchupLabel(selectedPlayer, selectedOpponent),
+                matchupLabel = buildMatchupLabel(selectedPlayer, effectiveOpponent),
                 switchSummaryText = switchPreview.summaryText,
                 hazardNoteText = switchPreview.hazardNoteText,
                 isPreview = selectedPlayer?.uuid != snapshot.playerActiveUuid || selectedOpponent?.uuid != snapshot.opponentActiveUuid,
@@ -98,7 +106,7 @@ object CalcComputationService {
                 yourMoves = damageResult.yourMoves.map(::toRow),
                 opponentMoves = damageResult.opponentMoves.map(::toRow),
                 statusText = listOfNotNull(reasonText, warningText).joinToString(" | "),
-                speedText = buildSpeedText(selectedPlayer, selectedOpponent, effectiveSet),
+                speedText = buildSpeedText(selectedPlayer, effectiveOpponent, effectiveSet),
                 debugText = debugText
             )
             lastSelectionFingerprint = selectionFingerprint
@@ -199,6 +207,98 @@ object CalcComputationService {
 
     private fun formatSpreadEvs(evs: CalcStats): String {
         return listOf(evs.hp, evs.atk, evs.def, evs.spa, evs.spd, evs.spe).joinToString("/") { it.toString() }
+    }
+
+    // Curated mega-stone -> form-aspect map. Most stones map to the "mega"
+    // aspect; Charizardite / Mewtwonite have X/Y variants.
+    private val MEGA_STONE_FORMS = mapOf(
+        "abomasite" to "mega", "absolite" to "mega", "aerodactylite" to "mega",
+        "aggronite" to "mega", "alakazite" to "mega", "altarianite" to "mega",
+        "ampharosite" to "mega", "audinite" to "mega", "banettite" to "mega",
+        "beedrillite" to "mega", "blastoisinite" to "mega", "blazikenite" to "mega",
+        "cameruptite" to "mega", "diancite" to "mega", "galladite" to "mega",
+        "garchompite" to "mega", "gardevoirite" to "mega", "gengarite" to "mega",
+        "glalitite" to "mega", "gyaradosite" to "mega", "heracronite" to "mega",
+        "houndoominite" to "mega", "kangaskhanite" to "mega", "latiasite" to "mega",
+        "latiosite" to "mega", "lopunnite" to "mega", "lucarionite" to "mega",
+        "manectite" to "mega", "mawilite" to "mega", "medichamite" to "mega",
+        "metagrossite" to "mega", "pidgeotite" to "mega", "pinsirite" to "mega",
+        "sablenite" to "mega", "salamencite" to "mega", "sceptilite" to "mega",
+        "scizorite" to "mega", "sharpedonite" to "mega", "slowbronite" to "mega",
+        "steelixite" to "mega", "swampertite" to "mega", "tyranitarite" to "mega",
+        "venusaurite" to "mega",
+        "charizarditex" to "mega-x", "charizarditey" to "mega-y",
+        "mewtwonitex" to "mega-x", "mewtwonitey" to "mega-y"
+    )
+
+    private fun megaFormAspect(itemName: String?): String? {
+        if (itemName.isNullOrBlank()) return null
+        val key = itemName.lowercase().replace(" ", "").replace("-", "").replace("'", "")
+        return MEGA_STONE_FORMS[key]
+    }
+
+    /**
+     * If the effective item is a mega stone for the opponent's species, swaps the
+     * opponent snapshot to that mega form (new base stats, types, intrinsic
+     * ability if not user-overridden) so damage / speed reflect post-mega values.
+     * Returns the original opponent + set when no swap applies.
+     */
+    private fun applyMegaFormSwap(
+        opponent: CalcPokemonSnapshot?,
+        effectiveSet: EffectiveBattleSet
+    ): Pair<CalcPokemonSnapshot?, EffectiveBattleSet> {
+        opponent ?: return null to effectiveSet
+        val itemName = effectiveSet.item.first ?: return opponent to effectiveSet
+        val aspect = megaFormAspect(itemName) ?: return opponent to effectiveSet
+
+        val baseSpeciesId = opponent.speciesId ?: return opponent to effectiveSet
+        val identifier = resolveSpeciesIdentifier(baseSpeciesId) ?: return opponent to effectiveSet
+        val species = PokemonSpecies.getByIdentifier(identifier) ?: return opponent to effectiveSet
+        val standard = species.standardForm
+        val candidates = if (aspect == "mega-x") listOf("mega-x", "megax")
+            else if (aspect == "mega-y") listOf("mega-y", "megay")
+            else listOf("mega")
+        val megaForm = candidates.firstNotNullOfOrNull { variant ->
+            runCatching { species.getForm(setOf(variant)) }.getOrNull()?.takeIf { it != standard }
+        } ?: return opponent to effectiveSet
+
+        val newBaseStats = CalcStats(
+            hp = megaForm.baseStats[Stats.HP] ?: opponent.baseStats?.hp ?: 0,
+            atk = megaForm.baseStats[Stats.ATTACK] ?: opponent.baseStats?.atk ?: 0,
+            def = megaForm.baseStats[Stats.DEFENCE] ?: opponent.baseStats?.def ?: 0,
+            spa = megaForm.baseStats[Stats.SPECIAL_ATTACK] ?: opponent.baseStats?.spa ?: 0,
+            spd = megaForm.baseStats[Stats.SPECIAL_DEFENCE] ?: opponent.baseStats?.spd ?: 0,
+            spe = megaForm.baseStats[Stats.SPEED] ?: opponent.baseStats?.spe ?: 0
+        )
+        val newTypes = listOfNotNull(megaForm.primaryType?.name, megaForm.secondaryType?.name)
+        val megaAbility = runCatching {
+            megaForm.abilities.mapNotNull { it.template.name }.firstOrNull()
+        }.getOrNull()
+
+        val formSuffix = when (aspect) {
+            "mega-x" -> " X"
+            "mega-y" -> " Y"
+            else -> ""
+        }
+        val transformedOpponent = opponent.copy(
+            baseStats = newBaseStats,
+            actualStats = null, // re-derive from new base stats
+            typeNames = newTypes,
+            formName = "Mega$formSuffix",
+            speciesLabel = "${opponent.speciesLabel} (Mega$formSuffix)",
+            // Null out so the EffectiveBattleSet's ability wins downstream — this
+            // lets the mega form's intrinsic ability (filled in below) apply.
+            abilityName = null
+        )
+
+        val abilityOverridden = overrides[opponent.uuid]?.abilityIndex != null
+        val nextAbility = if (!abilityOverridden && !megaAbility.isNullOrBlank()) {
+            megaAbility to InferenceValueState.REVEALED
+        } else {
+            effectiveSet.ability
+        }
+
+        return transformedOpponent to effectiveSet.copy(ability = nextAbility)
     }
 
     private fun toRow(estimate: DamageEstimate): CalcMoveRow {
