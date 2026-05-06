@@ -135,10 +135,19 @@ object BattleStateFacade {
 
         val trackedSpeciesId = BattleStateTracker.getSpeciesId(uuid)?.path
         val propertiesSpecies = properties.species
-        val baseSpeciesId = trackedSpeciesId ?: propertiesSpecies
+        // properties.species can carry a regional aspect (e.g. "moltres-galar") for entities
+        // that were spawned as the regional variant. When the tracker hasn't confirmed a
+        // species yet, split that aspect off so a Kantonian Moltres doesn't get classified
+        // as Galarian. canonicalSpeciesKey re-attaches the suffix once the form resolves.
+        val (propertiesBase, propertiesRegional) = if (trackedSpeciesId == null) {
+            splitRegionalForm(propertiesSpecies)
+        } else {
+            propertiesSpecies to null
+        }
+        val baseSpeciesId = trackedSpeciesId ?: propertiesBase
         val trackedFormName = BattleStateTracker.getCurrentForm(uuid)?.currentForm
         val propertyFormName = properties.form?.takeIf { it.isNotBlank() }
-        val resolvedFormName = trackedFormName ?: propertyFormName
+        val resolvedFormName = trackedFormName ?: propertyFormName ?: propertiesRegional
         val actorForm = actorPokemon?.form
         val resolvedRevealedMoves = resolveRevealedMoves(
             uuid = uuid,
@@ -333,5 +342,18 @@ object BattleStateFacade {
         return value.orEmpty().lowercase()
             .replace(" ", "-")
             .replace("_", "-")
+    }
+
+    private val REGIONAL_ASPECTS = listOf("galar", "alola", "hisui", "paldea")
+
+    private fun splitRegionalForm(species: String): Pair<String, String?> {
+        if (species.startsWith("delta:", ignoreCase = true)) return species to null
+        for (aspect in REGIONAL_ASPECTS) {
+            val suffix = "-$aspect"
+            if (species.endsWith(suffix, ignoreCase = true)) {
+                return species.dropLast(suffix.length) to aspect
+            }
+        }
+        return species to null
     }
 }
