@@ -117,9 +117,9 @@ object CalcComputationService {
         currentModel = null
     }
 
-    fun cycleItem(uuid: UUID, alternativesSize: Int) = cycle(uuid, OverrideRow.ITEM, alternativesSize)
-    fun cycleAbility(uuid: UUID, alternativesSize: Int) = cycle(uuid, OverrideRow.ABILITY, alternativesSize)
-    fun cycleSpread(uuid: UUID, alternativesSize: Int) = cycle(uuid, OverrideRow.SPREAD, alternativesSize)
+    fun cycleItem(uuid: UUID, alternativesSize: Int, direction: Int = 1) = cycle(uuid, OverrideRow.ITEM, alternativesSize, direction)
+    fun cycleAbility(uuid: UUID, alternativesSize: Int, direction: Int = 1) = cycle(uuid, OverrideRow.ABILITY, alternativesSize, direction)
+    fun cycleSpread(uuid: UUID, alternativesSize: Int, direction: Int = 1) = cycle(uuid, OverrideRow.SPREAD, alternativesSize, direction)
 
     fun resetOverride(uuid: UUID, row: OverrideRow) {
         val existing = overrides[uuid] ?: return
@@ -141,21 +141,21 @@ object CalcComputationService {
         }
     }
 
-    private fun cycle(uuid: UUID, row: OverrideRow, alternativesSize: Int) {
-        if (alternativesSize <= 1) return
+    private fun cycle(uuid: UUID, row: OverrideRow, alternativesSize: Int, direction: Int) {
+        if (alternativesSize <= 1 || direction == 0) return
         val existing = overrides[uuid] ?: OpponentOverride()
         val current = when (row) {
             OverrideRow.ITEM -> existing.itemIndex
             OverrideRow.ABILITY -> existing.abilityIndex
             OverrideRow.SPREAD -> existing.spreadIndex
         }
-        // Cycle: no-override -> 1 -> 2 -> ... -> (size-1) -> no-override.
-        // Index 0 is the inferred default, represented by null (no override stored).
-        val next: Int? = when {
-            current == null -> 1
-            current + 1 >= alternativesSize -> null
-            else -> current + 1
-        }
+        // Position 0 is the inferred default (stored as null). Cycle forward
+        // (+1) goes 0 -> 1 -> ... -> size-1 -> 0; backward (-1) wraps the
+        // other way. Floor-mod keeps the index in [0, size).
+        val currentIdx = current ?: 0
+        val raw = currentIdx + direction
+        val newIdx = ((raw % alternativesSize) + alternativesSize) % alternativesSize
+        val next: Int? = if (newIdx == 0) null else newIdx
         val updated = when (row) {
             OverrideRow.ITEM -> existing.copy(itemIndex = next)
             OverrideRow.ABILITY -> existing.copy(abilityIndex = next)

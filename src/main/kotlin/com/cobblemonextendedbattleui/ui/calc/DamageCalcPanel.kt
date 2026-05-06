@@ -61,6 +61,7 @@ object DamageCalcPanel {
     private val PILL_SEEN_BG = UIUtils.color(56, 161, 105, 60)
     private val PILL_LIKELY_BG = UIUtils.color(214, 158, 46, 60)
     private val PILL_UNK_BG = UIUtils.color(113, 128, 150, 60)
+    private val PILL_MANUAL_BG = UIUtils.color(56, 109, 161, 60)
 
     private val interaction = WidgetInteractionHandler(UIUtils.ActivePanel.DAMAGE_CALC).apply {
         dragThreshold = 4
@@ -75,12 +76,17 @@ object DamageCalcPanel {
     private var lastItemRowBounds = intArrayOf(0, 0, 0, 0)
     private var lastAbilityRowBounds = intArrayOf(0, 0, 0, 0)
     private var lastSpreadRowBounds = intArrayOf(0, 0, 0, 0)
+    private var lastItemBackBounds = intArrayOf(0, 0, 0, 0)
+    private var lastAbilityBackBounds = intArrayOf(0, 0, 0, 0)
+    private var lastSpreadBackBounds = intArrayOf(0, 0, 0, 0)
     private var lastPlayerTabBounds = emptyList<TabBounds>()
     private var lastOpponentTabBounds = emptyList<TabBounds>()
     private var summaryClickArmed = false
     private var pendingTabSelection: PendingTabSelection? = null
     private var pendingSectionToggle: SectionToggle? = null
-    private var pendingOverrideClick: OverrideRow? = null
+    private var pendingOverrideClick: PendingOverrideClick? = null
+
+    private data class PendingOverrideClick(val row: OverrideRow, val direction: Int)
 
     fun initialize() {
         CalcPanelState.load()
@@ -178,37 +184,54 @@ object DamageCalcPanel {
             val abilityHasAlts = model.opponentSet.abilityAlternatives.size > 1
             val spreadHasAlts = model.opponentSet.spreadAlternatives.size > 1
             val rowHeight = s(11).coerceAtLeast(8)
+            val pillX = cellX + cellW - s(34).coerceAtLeast(18)
+            val forwardX = pillX - s(8)
+            val backX = pillX - s(18)
+            val backZoneW = s(8).coerceAtLeast(6)
 
             val itemDisplay = formatInference(model.opponentSet.item.first) + if (itemOverridden) "*" else ""
             UIUtils.drawText(context, "Item: $itemDisplay", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
-            drawStatePill(context, cellX + cellW - s(34).coerceAtLeast(18), textY - 1, model.opponentSet.item.second, textScale, uiScale)
+            drawStatePill(context, pillX, textY - 1, model.opponentSet.item.second, textScale, uiScale, itemOverridden)
             if (itemHasAlts) {
-                UIUtils.drawText(context, ">", (cellX + cellW - s(44)).toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
+                UIUtils.drawText(context, "<", backX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
+                UIUtils.drawText(context, ">", forwardX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
+                lastItemBackBounds = intArrayOf(backX - 1, textY - 2, backZoneW, rowHeight)
+            } else {
+                lastItemBackBounds = intArrayOf(0, 0, 0, 0)
             }
             lastItemRowBounds = intArrayOf(cellX + 4, textY - 2, cellW - 8, rowHeight)
             textY += s(10)
 
             val abilityDisplay = formatInference(model.opponentSet.ability.first) + if (abilityOverridden) "*" else ""
             UIUtils.drawText(context, "Ability: $abilityDisplay", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
-            drawStatePill(context, cellX + cellW - s(34).coerceAtLeast(18), textY - 1, model.opponentSet.ability.second, textScale, uiScale)
+            drawStatePill(context, pillX, textY - 1, model.opponentSet.ability.second, textScale, uiScale, abilityOverridden)
             if (abilityHasAlts) {
-                UIUtils.drawText(context, ">", (cellX + cellW - s(44)).toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
+                UIUtils.drawText(context, "<", backX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
+                UIUtils.drawText(context, ">", forwardX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
+                lastAbilityBackBounds = intArrayOf(backX - 1, textY - 2, backZoneW, rowHeight)
+            } else {
+                lastAbilityBackBounds = intArrayOf(0, 0, 0, 0)
             }
             lastAbilityRowBounds = intArrayOf(cellX + 4, textY - 2, cellW - 8, rowHeight)
             textY += s(10)
 
+            // Spread row stays visible even in compact mode so users can still
+            // override it; only the source label below is dropped when compact.
+            val spreadDisplay = (model.opponentSet.spreadLabel ?: "Unknown") + if (spreadOverridden) "*" else ""
+            UIUtils.drawText(context, "Spread: $spreadDisplay", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
+            if (spreadHasAlts) {
+                UIUtils.drawText(context, "<", backX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
+                UIUtils.drawText(context, ">", forwardX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
+                lastSpreadBackBounds = intArrayOf(backX - 1, textY - 2, backZoneW, rowHeight)
+            } else {
+                lastSpreadBackBounds = intArrayOf(0, 0, 0, 0)
+            }
+            lastSpreadRowBounds = intArrayOf(cellX + 4, textY - 2, cellW - 8, rowHeight)
+            textY += s(9)
             if (!compact) {
-                val spreadDisplay = (model.opponentSet.spreadLabel ?: "Unknown") + if (spreadOverridden) "*" else ""
-                UIUtils.drawText(context, "Spread: $spreadDisplay", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
-                if (spreadHasAlts) {
-                    UIUtils.drawText(context, ">", (cellX + cellW - s(44)).toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
-                }
-                lastSpreadRowBounds = intArrayOf(cellX + 4, textY - 2, cellW - 8, rowHeight)
-                textY += s(9)
                 UIUtils.drawText(context, model.opponentSet.sourceLabel, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_LABEL, textScale)
                 textY += s(10)
             } else {
-                lastSpreadRowBounds = intArrayOf(0, 0, 0, 0)
                 textY += s(2)
             }
         } else {
@@ -218,6 +241,9 @@ object DamageCalcPanel {
             lastItemRowBounds = intArrayOf(0, 0, 0, 0)
             lastAbilityRowBounds = intArrayOf(0, 0, 0, 0)
             lastSpreadRowBounds = intArrayOf(0, 0, 0, 0)
+            lastItemBackBounds = intArrayOf(0, 0, 0, 0)
+            lastAbilityBackBounds = intArrayOf(0, 0, 0, 0)
+            lastSpreadBackBounds = intArrayOf(0, 0, 0, 0)
         }
 
         lastSummaryBounds = intArrayOf(cellX, summaryStartY - 2, cellW, (textY - summaryStartY + 2).coerceAtLeast(12))
@@ -397,21 +423,36 @@ object DamageCalcPanel {
                         pendingTabSelection = null
                         pendingOverrideClick = null
                         interaction.startDrag(mouseX, mouseY, x, y)
+                    } else if (rowsClickable && contains(mouseX, mouseY, lastItemBackBounds[0], lastItemBackBounds[1], lastItemBackBounds[2], lastItemBackBounds[3])) {
+                        summaryClickArmed = false
+                        pendingTabSelection = null
+                        pendingSectionToggle = null
+                        pendingOverrideClick = PendingOverrideClick(OverrideRow.ITEM, -1)
+                    } else if (rowsClickable && contains(mouseX, mouseY, lastAbilityBackBounds[0], lastAbilityBackBounds[1], lastAbilityBackBounds[2], lastAbilityBackBounds[3])) {
+                        summaryClickArmed = false
+                        pendingTabSelection = null
+                        pendingSectionToggle = null
+                        pendingOverrideClick = PendingOverrideClick(OverrideRow.ABILITY, -1)
+                    } else if (rowsClickable && contains(mouseX, mouseY, lastSpreadBackBounds[0], lastSpreadBackBounds[1], lastSpreadBackBounds[2], lastSpreadBackBounds[3])) {
+                        summaryClickArmed = false
+                        pendingTabSelection = null
+                        pendingSectionToggle = null
+                        pendingOverrideClick = PendingOverrideClick(OverrideRow.SPREAD, -1)
                     } else if (rowsClickable && contains(mouseX, mouseY, lastItemRowBounds[0], lastItemRowBounds[1], lastItemRowBounds[2], lastItemRowBounds[3])) {
                         summaryClickArmed = false
                         pendingTabSelection = null
                         pendingSectionToggle = null
-                        pendingOverrideClick = OverrideRow.ITEM
+                        pendingOverrideClick = PendingOverrideClick(OverrideRow.ITEM, 1)
                     } else if (rowsClickable && contains(mouseX, mouseY, lastAbilityRowBounds[0], lastAbilityRowBounds[1], lastAbilityRowBounds[2], lastAbilityRowBounds[3])) {
                         summaryClickArmed = false
                         pendingTabSelection = null
                         pendingSectionToggle = null
-                        pendingOverrideClick = OverrideRow.ABILITY
+                        pendingOverrideClick = PendingOverrideClick(OverrideRow.ABILITY, 1)
                     } else if (rowsClickable && contains(mouseX, mouseY, lastSpreadRowBounds[0], lastSpreadRowBounds[1], lastSpreadRowBounds[2], lastSpreadRowBounds[3])) {
                         summaryClickArmed = false
                         pendingTabSelection = null
                         pendingSectionToggle = null
-                        pendingOverrideClick = OverrideRow.SPREAD
+                        pendingOverrideClick = PendingOverrideClick(OverrideRow.SPREAD, 1)
                     } else if (CalcPanelState.expanded && contains(mouseX, mouseY, summaryBounds[0], summaryBounds[1], summaryBounds[2], summaryBounds[3])) {
                         pendingTabSelection = null
                         pendingSectionToggle = null
@@ -439,18 +480,19 @@ object DamageCalcPanel {
                 interaction.endResize()
                 CalcPanelState.save()
             } else if (pendingOverrideClick != null) {
-                val row = pendingOverrideClick!!
-                val bounds = when (row) {
-                    OverrideRow.ITEM -> lastItemRowBounds
-                    OverrideRow.ABILITY -> lastAbilityRowBounds
-                    OverrideRow.SPREAD -> lastSpreadRowBounds
+                val pending = pendingOverrideClick!!
+                val (rowBounds, backBounds) = when (pending.row) {
+                    OverrideRow.ITEM -> lastItemRowBounds to lastItemBackBounds
+                    OverrideRow.ABILITY -> lastAbilityRowBounds to lastAbilityBackBounds
+                    OverrideRow.SPREAD -> lastSpreadRowBounds to lastSpreadBackBounds
                 }
+                val targetBounds = if (pending.direction < 0) backBounds else rowBounds
                 val opponentUuid = model.selectedOpponentUuid
-                if (opponentUuid != null && contains(mouseX, mouseY, bounds[0], bounds[1], bounds[2], bounds[3])) {
-                    when (row) {
-                        OverrideRow.ITEM -> CalcComputationService.cycleItem(opponentUuid, model.opponentSet.itemAlternatives.size)
-                        OverrideRow.ABILITY -> CalcComputationService.cycleAbility(opponentUuid, model.opponentSet.abilityAlternatives.size)
-                        OverrideRow.SPREAD -> CalcComputationService.cycleSpread(opponentUuid, model.opponentSet.spreadAlternatives.size)
+                if (opponentUuid != null && contains(mouseX, mouseY, targetBounds[0], targetBounds[1], targetBounds[2], targetBounds[3])) {
+                    when (pending.row) {
+                        OverrideRow.ITEM -> CalcComputationService.cycleItem(opponentUuid, model.opponentSet.itemAlternatives.size, pending.direction)
+                        OverrideRow.ABILITY -> CalcComputationService.cycleAbility(opponentUuid, model.opponentSet.abilityAlternatives.size, pending.direction)
+                        OverrideRow.SPREAD -> CalcComputationService.cycleSpread(opponentUuid, model.opponentSet.spreadAlternatives.size, pending.direction)
                     }
                 }
                 pendingOverrideClick = null
@@ -773,11 +815,12 @@ object DamageCalcPanel {
         return "$out…"
     }
 
-    private fun drawStatePill(context: DrawContext, x: Int, y: Int, state: InferenceValueState, scale: Float, uiScale: Float = 1.0f) {
-        val (bg, fg, label) = when (state) {
-            InferenceValueState.REVEALED -> Triple(PILL_SEEN_BG, V2_ACCENT_GREEN, "SEEN")
-            InferenceValueState.GUESSED -> Triple(PILL_LIKELY_BG, V2_ACCENT_YELLOW, "LIKELY")
-            InferenceValueState.UNKNOWN -> Triple(PILL_UNK_BG, V2_TEXT_DIM, "?")
+    private fun drawStatePill(context: DrawContext, x: Int, y: Int, state: InferenceValueState, scale: Float, uiScale: Float = 1.0f, isOverride: Boolean = false) {
+        val (bg, fg, label) = when {
+            isOverride -> Triple(PILL_MANUAL_BG, V2_ACCENT_BLUE, "MANUAL")
+            state == InferenceValueState.REVEALED -> Triple(PILL_SEEN_BG, V2_ACCENT_GREEN, "SEEN")
+            state == InferenceValueState.GUESSED -> Triple(PILL_LIKELY_BG, V2_ACCENT_YELLOW, "LIKELY")
+            else -> Triple(PILL_UNK_BG, V2_TEXT_DIM, "?")
         }
         val pillScale = (scale - 0.15f).coerceAtLeast(0.42f)
         val tw = (MinecraftClient.getInstance().textRenderer.getWidth(label) * pillScale).toInt()
