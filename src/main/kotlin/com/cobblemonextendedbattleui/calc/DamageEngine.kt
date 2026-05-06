@@ -345,6 +345,7 @@ object BestEffortDamageEngine : DamageEngine {
         val defenderAtFullHp = defenderMaxHp > 0 && defenderCurrentHp >= defenderMaxHp
 
         fixedDamageOverride(template, attacker, defender, defenderMaxHp)?.let { fixed ->
+            val fixedKoLabel = koLabel(defenderCurrentHp, fixed, fixed)
             return DamageEstimate(
                 moveId = moveId,
                 moveName = moveDisplayName,
@@ -352,8 +353,8 @@ object BestEffortDamageEngine : DamageEngine {
                 maxDamage = fixed,
                 minPercent = damagePercent(fixed, defenderMaxHp),
                 maxPercent = damagePercent(fixed, defenderMaxHp),
-                koLabel = koLabel(defenderCurrentHp, fixed, fixed),
-                confidence = confidenceFor(attacker, defender, guessed, warnings, blockingIssues),
+                koLabel = fixedKoLabel,
+                confidence = confidenceFor(attacker, defender, guessed, warnings, blockingIssues, fixedKoLabel),
                 warnings = warnings,
                 emphasized = emphasize
             )
@@ -384,7 +385,7 @@ object BestEffortDamageEngine : DamageEngine {
                 minPercent = 0.0,
                 maxPercent = 0.0,
                 koLabel = "Immune",
-                confidence = confidenceFor(attacker, defender, guessed, warnings, blockingIssues),
+                confidence = confidenceFor(attacker, defender, guessed, warnings, blockingIssues, "Immune"),
                 warnings = warnings,
                 emphasized = emphasize
             )
@@ -455,7 +456,7 @@ object BestEffortDamageEngine : DamageEngine {
             minPercent = minPercent,
             maxPercent = maxPercent,
             koLabel = koLabel,
-            confidence = confidenceFor(attacker, defender, guessed, warnings, blockingIssues),
+            confidence = confidenceFor(attacker, defender, guessed, warnings, blockingIssues, koLabel),
             warnings = warnings,
             emphasized = emphasize,
             critMinDamage = critMinDamage,
@@ -1019,12 +1020,15 @@ object BestEffortDamageEngine : DamageEngine {
         defender: DamageCombatant,
         guessed: Boolean,
         warnings: List<String>,
-        blockingIssues: List<String>
+        blockingIssues: List<String>,
+        koLabel: String?
     ): DamageConfidence {
+        val isOhkoLabel = koLabel == "OHKO" || koLabel == "Likely OHKO"
         return when {
             blockingIssues.isNotEmpty() -> DamageConfidence.LOW
             guessed -> DamageConfidence.LOW
             warnings.any { it.startsWith("Unknown", ignoreCase = true) } -> DamageConfidence.LOW
+            isOhkoLabel && warnings.any { it.startsWith("Inferred", ignoreCase = true) } -> DamageConfidence.LOW
             warnings.any { it.startsWith("Inferred", ignoreCase = true) } -> DamageConfidence.MEDIUM
             attacker.snapshot.actualStats == null || defender.snapshot.actualStats == null -> DamageConfidence.MEDIUM
             else -> DamageConfidence.HIGH
