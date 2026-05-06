@@ -7,12 +7,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import com.cobblemon.mod.common.client.CobblemonClient;
 import com.cobblemon.mod.common.client.battle.ClientBattle;
+import com.cobblemon.mod.common.client.battle.ClientBattlePokemon;
 import com.cobblemon.mod.common.client.net.battle.BattleSwitchPokemonHandler;
 import com.cobblemon.mod.common.net.messages.client.battle.BattleSwitchPokemonPacket;
 import com.cobblemon.mod.common.net.messages.client.battle.BattleInitializePacket;
 import com.cobblemonextendedbattleui.BattleStateTracker;
 import com.cobblemonextendedbattleui.DamageTracker;
 import com.cobblemonextendedbattleui.PanelConfig;
+import com.cobblemonextendedbattleui.battle.state.AbilityItemTracker;
 import net.minecraft.client.MinecraftClient;
 
 import java.util.UUID;
@@ -32,6 +34,35 @@ public class BattleSwitchHandlerMixin {
 
         // Skip if no tracking is needed
         if (!needsStateTracking && !needsDamageTracking) return;
+
+        // Regenerator restores 33% HP to the OUTGOING Pokemon on switch-out.
+        // At HEAD inject the slot still holds the active (outgoing) Pokemon, so
+        // packet.getPnx() resolves to it. Gated on >0% HP because Regenerator
+        // does not trigger from a KO-forced switch (faint message zeros HP first).
+        if (needsStateTracking && needsDamageTracking) {
+            try {
+                ClientBattle battle = CobblemonClient.INSTANCE.getBattle();
+                if (battle != null) {
+                    var slotResult = battle.getPokemonFromPNX(packet.getPnx());
+                    if (slotResult != null) {
+                        ClientBattlePokemon outgoing = slotResult.getSecond().getBattlePokemon();
+                        if (outgoing != null) {
+                            UUID outgoingUuid = outgoing.getUuid();
+                            String ability = AbilityItemTracker.INSTANCE.getRevealedAbility(outgoingUuid);
+                            if (ability != null && ability.equalsIgnoreCase("Regenerator")) {
+                                Float currentHp = DamageTracker.INSTANCE.getLastKnownHpPercent(outgoingUuid);
+                                if (currentHp != null && currentHp > 0f) {
+                                    float restored = Math.min(100f, currentHp + 33.33f);
+                                    DamageTracker.INSTANCE.updateHpPercent(outgoingUuid, restored);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // Silent fail to avoid breaking gameplay
+            }
+        }
 
         try {
             BattleInitializePacket.ActiveBattlePokemonDTO newPokemon = packet.getNewPokemon();
