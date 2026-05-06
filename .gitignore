@@ -13,3 +13,10 @@ __pycache__/
 Thumbs.db
 Desktop.ini
 tools/database/generated/
+
+# Local agent / debug clutter
+.claude/
+.codex_tmp/
+.codex_tmp_delta/
+battleinfo/
+*.bak
