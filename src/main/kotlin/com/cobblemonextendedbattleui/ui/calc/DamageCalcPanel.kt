@@ -190,7 +190,9 @@ object DamageCalcPanel {
             val backX = pillX - s(18)
             val backZoneW = s(8).coerceAtLeast(6)
 
-            val itemDisplay = formatInference(model.opponentSet.item.first) + if (itemOverridden) "*" else ""
+            val itemValue = formatInference(model.opponentSet.item.first)
+            val itemUsage = model.opponentSet.itemUsagePercent[normalizeForUsageLookup(model.opponentSet.item.first)]
+            val itemDisplay = buildOverrideRowText(itemValue, itemUsage, itemOverridden)
             UIUtils.drawText(context, "Item: $itemDisplay", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
             drawStatePill(context, pillX, textY - 1, model.opponentSet.item.second, textScale, uiScale, itemOverridden)
             if (itemHasAlts) {
@@ -203,7 +205,9 @@ object DamageCalcPanel {
             lastItemRowBounds = intArrayOf(cellX + 4, textY - 2, cellW - 8, rowHeight)
             textY += s(10)
 
-            val abilityDisplay = formatInference(model.opponentSet.ability.first) + if (abilityOverridden) "*" else ""
+            val abilityValue = formatInference(model.opponentSet.ability.first)
+            val abilityUsage = model.opponentSet.abilityUsagePercent[normalizeForUsageLookup(model.opponentSet.ability.first)]
+            val abilityDisplay = buildOverrideRowText(abilityValue, abilityUsage, abilityOverridden)
             UIUtils.drawText(context, "Ability: $abilityDisplay", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
             drawStatePill(context, pillX, textY - 1, model.opponentSet.ability.second, textScale, uiScale, abilityOverridden)
             if (abilityHasAlts) {
@@ -218,8 +222,14 @@ object DamageCalcPanel {
 
             // Spread row stays visible even in compact mode so users can still
             // override it; only the source label below is dropped when compact.
-            val spreadDisplay = (model.opponentSet.spreadLabel ?: "Unknown") + if (spreadOverridden) "*" else ""
+            val spreadValue = model.opponentSet.spreadLabel ?: "Unknown"
+            val spreadUsage = model.opponentSet.spread?.usagePercent
+            val spreadDisplay = buildOverrideRowText(spreadValue, spreadUsage, spreadOverridden)
             UIUtils.drawText(context, "Spread: $spreadDisplay", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
+            // Spread gets a MANUAL pill when overridden; otherwise the inference
+            // state pill (LIKELY for usage-derived, UNKNOWN for missing data).
+            val spreadState = model.opponentSet.spread?.state ?: InferenceValueState.UNKNOWN
+            drawStatePill(context, pillX, textY - 1, spreadState, textScale, uiScale, spreadOverridden)
             if (spreadHasAlts) {
                 UIUtils.drawText(context, "<", backX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
                 UIUtils.drawText(context, ">", forwardX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
@@ -856,6 +866,24 @@ object DamageCalcPanel {
     private fun formatInference(value: String?): String {
         // State is shown via pill chip in the render path; label stays plain.
         return value ?: "Unknown"
+    }
+
+    private fun normalizeForUsageLookup(value: String?): String {
+        // Mirrors normalizeToken in CalcBattleSnapshot.kt so the renderer can
+        // hit the EffectiveBattleSet's usage % maps without leaking the
+        // internal helper here.
+        return value.orEmpty().lowercase()
+            .replace(" ", "")
+            .replace("-", "")
+            .replace("_", "")
+            .replace("'", "")
+            .replace(".", "")
+    }
+
+    private fun buildOverrideRowText(value: String, usagePercent: Double?, overridden: Boolean): String {
+        val pct = usagePercent?.takeIf { it > 0.0 }?.let { " (${it.roundToInt()}%)" } ?: ""
+        val star = if (overridden) "*" else ""
+        return "$value$pct$star"
     }
 
     private fun speedColor(speedText: String): Int {

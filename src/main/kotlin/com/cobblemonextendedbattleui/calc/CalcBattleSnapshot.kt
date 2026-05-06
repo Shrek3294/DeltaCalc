@@ -126,7 +126,8 @@ data class InferenceSpread(
     val nature: String,
     val evs: CalcStats,
     val state: InferenceValueState,
-    val confidenceLabel: String
+    val confidenceLabel: String,
+    val usagePercent: Double? = null
 )
 
 data class EffectiveBattleSet(
@@ -141,7 +142,11 @@ data class EffectiveBattleSet(
     // Index 0 is the inferred default; cycling wraps back to no-override.
     val itemAlternatives: List<String> = emptyList(),
     val abilityAlternatives: List<String> = emptyList(),
-    val spreadAlternatives: List<InferenceSpread> = emptyList()
+    val spreadAlternatives: List<InferenceSpread> = emptyList(),
+    // Usage % keyed by normalized name. Empty/missing for entries that come
+    // from curated fallbacks rather than usage data.
+    val itemUsagePercent: Map<String, Double> = emptyMap(),
+    val abilityUsagePercent: Map<String, Double> = emptyMap()
 )
 
 enum class DamageConfidence {

@@ -34,7 +34,8 @@ class OpponentInferenceService {
                     spe = it.evs["spe"] ?: 0
                 ),
                 state = InferenceValueState.GUESSED,
-                confidenceLabel = confidenceLabel(it.usagePercent)
+                confidenceLabel = confidenceLabel(it.usagePercent),
+                usagePercent = it.usagePercent
             )
         }
 
@@ -111,9 +112,17 @@ class OpponentInferenceService {
                     spe = entry.evs["spe"] ?: 0
                 ),
                 state = InferenceValueState.GUESSED,
-                confidenceLabel = confidenceLabel(entry.usagePercent)
+                confidenceLabel = confidenceLabel(entry.usagePercent),
+                usagePercent = entry.usagePercent
             )
         }
+        // Map normalized name -> usage % for the renderer to surface "(45%)"
+        // labels next to whichever entry is currently displayed. First-occurrence
+        // wins so the top-ranked usage entry sets the percentage.
+        val itemUsagePercent = usage.items
+            .associateBy(keySelector = { normalizeToken(it.displayName) }, valueTransform = { it.usagePercent })
+        val abilityUsagePercent = usage.abilities
+            .associateBy(keySelector = { normalizeToken(it.displayName) }, valueTransform = { it.usagePercent })
 
         return EffectiveBattleSet(
             speciesId = species?.speciesKey ?: usage.speciesKey,
@@ -125,7 +134,9 @@ class OpponentInferenceService {
             moves = orderedMoves,
             itemAlternatives = itemAlternatives,
             abilityAlternatives = abilityAlternatives,
-            spreadAlternatives = spreadAlternatives
+            spreadAlternatives = spreadAlternatives,
+            itemUsagePercent = itemUsagePercent,
+            abilityUsagePercent = abilityUsagePercent
         )
     }
 
