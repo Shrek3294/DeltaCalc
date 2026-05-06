@@ -14,6 +14,9 @@ import com.cobblemonextendedbattleui.DamageTracker;
 import com.cobblemonextendedbattleui.TeamIndicatorUI;
 import com.cobblemonextendedbattleui.BattleStateTracker;
 import com.cobblemonextendedbattleui.PanelConfig;
+import com.cobblemonextendedbattleui.battle.messages.MessageParser;
+import com.cobblemonextendedbattleui.battle.state.PokemonRegistry;
+import com.cobblemonextendedbattleui.calc.DebugDumper;
 import net.minecraft.client.MinecraftClient;
 
 import java.util.UUID;
@@ -80,6 +83,9 @@ public class BattleHealthChangeHandlerMixin {
 
                         if (hpChange > 0.5f) {
                             DamageTracker.INSTANCE.recordDamage(pokemonName, hpChange);
+                            DebugDumper.INSTANCE.recordActualDamage(
+                                    uuid, pokemonName, oldPercent, newPercent, maxHp, isFlat);
+                            inferLifeOrbFromSelfDamage(uuid, pokemonName, hpChange);
                         } else if (hpChange < -0.5f) {
                             DamageTracker.INSTANCE.recordHealing(pokemonName, -hpChange);
                         }
@@ -99,5 +105,36 @@ public class BattleHealthChangeHandlerMixin {
         } catch (Exception e) {
             // Silent fail to avoid breaking gameplay
         }
+    }
+
+    /**
+     * Infer Life Orb when an attacker takes ~10% self-damage immediately after using a move.
+     * Cobblemon's `cobblemon.battle.damage.lifeorb` translation key handles the explicit case,
+     * but Delta builds may not always emit it. This is a fallback so the calc's item-aware
+     * damage modifiers (Life Orb's +30% multiplier) actually fire.
+     *
+     * Filters to avoid false positives:
+     *  - Target must be the most recent move's user (i.e. self-damage on the attacker).
+     *  - The move must still be resolving (lastMoveResolved=false) so this isn't a hazard tick.
+     *  - Damage delta in [9.0, 11.0]% — tight enough to exclude:
+     *      * Iron Barbs / Rough Skin (12.5%)
+     *      * Rocky Helmet (16.67%)
+     *      * Brave Bird / Flare Blitz / Wood Hammer recoil (33%)
+     *      * Take Down / Submission recoil (25%)
+     *  - setItem with HELD is no-op when an item is already revealed, so confirmed items win.
+     */
+    private void inferLifeOrbFromSelfDamage(UUID targetUuid, String targetName, float damagePct) {
+        if (damagePct < 9.0f || damagePct > 11.0f) return;
+        if (MessageParser.INSTANCE.getLastMoveResolved()) return;
+        String attacker = MessageParser.INSTANCE.getLastMoveUser();
+        String moveName = MessageParser.INSTANCE.getLastMoveName();
+        if (attacker == null || moveName == null) return;
+
+        UUID attackerUuid = PokemonRegistry.INSTANCE.resolvePokemonUuid(attacker, null);
+        if (attackerUuid == null || !attackerUuid.equals(targetUuid)) return;
+
+        // Don't overwrite a confirmed item — setItem(HELD) is no-op when already set.
+        BattleStateTracker.INSTANCE.setItem(
+                attacker, "Life Orb", BattleStateTracker.ItemStatus.HELD, null);
     }
 }

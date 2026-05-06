@@ -1,10 +1,13 @@
 package com.cobblemonextendedbattleui
 
+import com.cobblemon.mod.common.api.pokemon.PokemonSpecies
 import com.cobblemonextendedbattleui.battle.messages.MessageParser
 import com.cobblemonextendedbattleui.battle.messages.StateUpdater
 import com.cobblemonextendedbattleui.battle.messages.TranslationKeys
+import com.cobblemonextendedbattleui.calc.DebugDumper
 import net.minecraft.text.Text
 import net.minecraft.text.TranslatableTextContent
+import net.minecraft.util.Identifier
 
 /**
  * Parses Cobblemon battle messages (via TranslatableTextContent) and updates BattleStateTracker.
@@ -46,7 +49,22 @@ object BattleMessageInterceptor {
 
             if (key == TranslationKeys.TURN_KEY) {
                 StateUpdater.extractTurn(args)
+                MessageParser.markMoveResolved()
+                DebugDumper.resetHitAggregator()
                 return
+            }
+
+            // End-of-move-phase signals: faint, switch-in, send-out, drag.
+            // These mark the prior move as resolved so DebugDumper doesn't pair
+            // post-move passive damage (Toxic / Leech Seed / hazards) against it.
+            if (key == TranslationKeys.FAINT_KEY ||
+                key == TranslationKeys.SWITCH_KEY ||
+                key == TranslationKeys.DRAG_KEY ||
+                key == TranslationKeys.SENDOUT_KEY ||
+                key == TranslationKeys.REPLACE_KEY
+            ) {
+                MessageParser.markMoveResolved()
+                DebugDumper.resetHitAggregator()
             }
 
             // Track move usage with target: [user, moveName, target]
@@ -391,9 +409,18 @@ object BattleMessageInterceptor {
 
             if ((key == TranslationKeys.MEGA_FORMECHANGE_KEY || key == TranslationKeys.MEGA_EVOLVED_KEY) && args.isNotEmpty()) {
                 val pokemonName = MessageParser.argToString(args[0])
-                BattleStateTracker.setCurrentForm(pokemonName, "Mega", isMega = true, isTemporary = false)
                 val speciesId = BattleStateTracker.getSpeciesIdByName(pokemonName)
-                BattleStateTracker.updateTypesForFormChange(pokemonName, speciesId, "Mega")
+                // Only apply form=Mega when the species actually has a Mega form. Otherwise
+                // some Delta-server messages mis-tag non-Mega Pokémon (e.g. Iron Valiant)
+                // with this key, and we'd load wrong base stats from a non-existent Mega form.
+                if (speciesId != null && hasMegaForm(speciesId)) {
+                    BattleStateTracker.setCurrentForm(pokemonName, "Mega", isMega = true, isTemporary = false)
+                    BattleStateTracker.updateTypesForFormChange(pokemonName, speciesId, "Mega")
+                } else {
+                    CobblemonExtendedBattleUI.LOGGER.debug(
+                        "BattleMessageInterceptor: ignoring MEGA form change for $pokemonName — species has no mega form"
+                    )
+                }
             }
 
             TranslationKeys.SPECIAL_FORMECHANGE_KEYS[key]?.let { formName ->
@@ -526,5 +553,25 @@ object BattleMessageInterceptor {
         CobblemonExtendedBattleUI.LOGGER.debug(
             "BattleMessageInterceptor: Embody Aspect on $pokemonName -> +1 ${stat.abbr}"
         )
+    }
+
+    /**
+     * Whether this species actually has a Mega Evolution form. Used to filter spurious
+     * `cobblemon.battle.formechange.mega` / `cobblemon.battle.mega` messages that some
+     * Delta-server flows fire for non-mega Pokémon (e.g. Iron Valiant), which would
+     * otherwise corrupt our form tracking and pull wrong base stats from a non-existent
+     * Mega form.
+     */
+    private fun hasMegaForm(speciesId: Identifier): Boolean {
+        val species = PokemonSpecies.getByIdentifier(speciesId) ?: return false
+        val standard = species.standardForm
+        val megaForm = runCatching { species.getForm(setOf("mega")) }.getOrNull()
+        if (megaForm != null && megaForm != standard) return true
+        // Charizard / Mewtwo have mega-x and mega-y variants.
+        for (variant in listOf("mega-x", "mega-y", "megax", "megay")) {
+            val form = runCatching { species.getForm(setOf(variant)) }.getOrNull()
+            if (form != null && form != standard) return true
+        }
+        return false
     }
 }

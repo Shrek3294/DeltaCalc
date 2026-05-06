@@ -3,12 +3,13 @@ import argparse
 import concurrent.futures
 import datetime as dt
 import json
-import re
 import subprocess
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from _common import alias_variants, compact, detect_showdown_data_dir, load_json, slugify
 
 
 RANKED_DEFAULTS = [
@@ -18,48 +19,12 @@ RANKED_DEFAULTS = [
 ]
 
 
-def slugify(value: str) -> str:
-    return value.strip().lower().replace(" ", "-").replace("_", "-")
-
-
-def compact(value: str) -> str:
-    return re.sub(r"[-_ '.]", "", slugify(value))
-
-
-def alias_variants(*values: str | None) -> list[str]:
-    results: list[str] = []
-    seen = set()
-    for value in values:
-        if not value:
-            continue
-        for variant in [value.strip(), slugify(value), compact(value), value.strip().replace("-", " ")]:
-            if variant and variant not in seen:
-                seen.add(variant)
-                results.append(variant)
-        # Reverse-form variants for Delta species: "Aegislash-Delta" -> "Delta Aegislash", "delta-aegislash", "deltaaegislash"
-        stripped = value.strip()
-        low = stripped.lower()
-        if "delta" in low:
-            tokens = [t for t in low.replace("_", "-").replace(" ", "-").split("-") if t]
-            if "delta" in tokens:
-                non_delta = [t for t in tokens if t != "delta"]
-                if non_delta:
-                    reversed_slug = "delta-" + "-".join(non_delta)
-                    reversed_space = "Delta " + " ".join(t.capitalize() for t in non_delta)
-                    for variant in [reversed_slug, reversed_space, compact(reversed_slug), reversed_space.lower()]:
-                        if variant and variant not in seen:
-                            seen.add(variant)
-                            results.append(variant)
-    return results
-
-
 def detect_showdown_pokedex() -> Path | None:
-    path = Path.home() / "AppData" / "Roaming" / "ModrinthApp" / "profiles" / "Cobblemon Delta" / "showdown" / "data" / "pokedex.js"
+    data_dir = detect_showdown_data_dir()
+    if not data_dir:
+        return None
+    path = data_dir / "pokedex.js"
     return path if path.exists() else None
-
-
-def load_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def load_ranked_entries(paths: list[Path]) -> tuple[dict[str, dict], dict[str, dict]]:
@@ -82,7 +47,7 @@ def load_ranked_entries(paths: list[Path]) -> tuple[dict[str, dict], dict[str, d
                 "slug": entry.get("slug") or species_key,
                 "formName": display_name.split("-", 1)[1] if "-" in display_name else None,
                 "aliases": aliases,
-                "typeNames": entry.get("types") or [],
+                "typeNames": [str(t).strip().capitalize() for t in (entry.get("types") or []) if t],
                 "baseStats": normalize_base_stats(entry.get("baseStats")),
             }
             set_map[species_key] = {
@@ -273,6 +238,92 @@ def load_curated_sets(path: Path | None) -> dict[str, dict]:
     return curated
 
 
+def load_learnset_index(path: Path | None) -> dict[str, dict]:
+    """Load learnsets.generated.json keyed by speciesKey for legality checks.
+    Returns empty dict if the file isn't present (validation becomes a no-op)."""
+    if not path or not path.exists():
+        return {}
+    payload = load_json(path)
+    index: dict[str, dict] = {}
+    for entry in payload.get("species", []):
+        key = entry.get("speciesKey")
+        if not key:
+            continue
+        # Normalize both move and ability ids to compact form so kebab-case curator
+        # input ('salt-cure') matches Showdown's compact ids ('saltcure').
+        legal_moves = {compact(m.get("id") or m.get("displayName") or "") for m in entry.get("moves", [])}
+        legal_moves.discard("")
+        legal_abilities = {compact(a) for a in entry.get("abilities", []) if a}
+        index[key] = {
+            "displayName": entry.get("displayName"),
+            "isStub": entry.get("_stub", False),
+            "isFinalEvo": entry.get("isFinalEvo", False),
+            "moves": legal_moves,
+            "abilities": legal_abilities,
+        }
+    return index
+
+
+def warn_curated_legality(curated: dict[str, dict], learnset_index: dict[str, dict]) -> int:
+    """Warn (non-fatal) when a curated entry picks a move/ability not in the legal list.
+    Stub species (no Showdown learnset) are skipped. Returns warning count."""
+    if not learnset_index:
+        return 0
+    warnings = 0
+    for species_key, entry in curated.items():
+        legal = learnset_index.get(species_key)
+        if not legal or legal.get("isStub"):
+            continue
+        for move in entry.get("moves", []):
+            mid = move.get("id") or ""
+            normalized = compact(mid) if mid else compact(move.get("displayName") or "")
+            if normalized and normalized not in legal["moves"]:
+                print(
+                    f"WARN curated[{species_key}]: move '{move.get('displayName') or mid}' "
+                    f"not in Showdown learnset",
+                    file=sys.stderr,
+                )
+                warnings += 1
+        for ability in entry.get("abilities", []):
+            aid = ability.get("id") or ""
+            normalized = compact(aid) if aid else compact(ability.get("displayName") or "")
+            if normalized and normalized not in legal["abilities"]:
+                print(
+                    f"WARN curated[{species_key}]: ability '{ability.get('displayName') or aid}' "
+                    f"not in legal ability list",
+                    file=sys.stderr,
+                )
+                warnings += 1
+    return warnings
+
+
+def load_learnsets_species(path: Path | None) -> dict[str, dict]:
+    """Pull species metadata (types, abilities, baseStats, weight) from
+    learnsets.generated.json. For custom Delta mons this beats the ranked-scrape
+    fallback because team-builder is the authoritative type source."""
+    if not path or not path.exists():
+        return {}
+    payload = load_json(path)
+    species_map: dict[str, dict] = {}
+    for entry in payload.get("species", []):
+        key = entry.get("speciesKey")
+        if not key:
+            continue
+        display_name = entry.get("displayName") or key
+        species_map[key] = {
+            "speciesKey": key,
+            "speciesId": entry.get("speciesId") or key,
+            "displayName": display_name,
+            "slug": key,
+            "formName": entry.get("forme"),
+            "aliases": alias_variants(display_name, key, entry.get("speciesId"), entry.get("baseSpecies")),
+            "typeNames": list(entry.get("types") or []),
+            "baseStats": normalize_base_stats(entry.get("baseStats")),
+            "weightKg": entry.get("weightKg") if isinstance(entry.get("weightKg"), (int, float)) else None,
+        }
+    return species_map
+
+
 def load_external_species(path: Path | None) -> dict[str, dict]:
     if not path or not path.exists():
         return {}
@@ -339,33 +390,21 @@ def extract_json_array(html: str, key: str) -> list:
     return []
 
 
-def parse_smogon_page(species_key: str) -> dict | None:
-    url = f"https://www.smogon.com/dex/sv/pokemon/{species_key}/national-dex/"
-    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            html = response.read().decode("utf-8", "ignore")
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return None
-        raise
+SMOGON_GEN_CASCADE = ["sv", "ss", "sm", "xy", "bw", "dp", "rs", "gs", "rb"]
 
+
+def extract_strategies(html: str) -> list[dict]:
+    """Pull the strategies array from the Smogon dex page's dump-pokemon RPC response."""
     settings = extract_dex_settings(html)
-    dump = None
-    if settings:
-        for rpc_request, rpc_response in settings.get("injectRpcs", []):
-            if '"dump-pokemon"' in rpc_request:
-                dump = rpc_response
-                break
+    if not settings:
+        return []
+    for rpc_request, rpc_response in settings.get("injectRpcs", []):
+        if '"dump-pokemon"' in rpc_request:
+            return rpc_response.get("strategies") or []
+    return []
 
-    movesets = extract_json_array(html, "movesets")
-    if not movesets:
-        return None
-    moveset = movesets[0]
-    display_name = (dump or {}).get("pokemon", {}).get("name") or moveset.get("pokemon") or species_key
-    if compact(display_name) != compact(species_key):
-        return None
 
+def shape_smogon_set(species_key: str, display_name: str, moveset: dict, source_label: str) -> dict:
     moves = []
     for slot in moveset.get("moveslots", [])[:4]:
         if not slot:
@@ -373,59 +412,44 @@ def parse_smogon_page(species_key: str) -> dict | None:
         move_name = slot[0].get("move")
         if not move_name:
             continue
-        moves.append(
-            {
-                "id": slugify(move_name),
-                "displayName": move_name,
-                "type": None,
-                "usagePercent": 100.0,
-            }
-        )
+        moves.append({
+            "id": slugify(move_name),
+            "displayName": move_name,
+            "type": None,
+            "usagePercent": 100.0,
+        })
 
     items = [
-        {
-            "id": slugify(item),
-            "displayName": item,
-            "type": "item",
-            "usagePercent": 100.0,
-        }
+        {"id": slugify(item), "displayName": item, "type": "item", "usagePercent": 100.0}
         for item in (moveset.get("items") or [])[:1]
     ]
     abilities = [
-        {
-            "id": slugify(ability),
-            "displayName": ability,
-            "type": "ability",
-            "usagePercent": 100.0,
-        }
+        {"id": slugify(ability), "displayName": ability, "type": "ability", "usagePercent": 100.0}
         for ability in (moveset.get("abilities") or [])[:1]
     ]
-
     spreads = []
     evconfig = (moveset.get("evconfigs") or [None])[0]
     nature = (moveset.get("natures") or [None])[0]
     if evconfig and nature:
-        spreads.append(
-            {
-                "nature": nature,
-                "evs": {
-                    "hp": int(evconfig.get("hp", 0)),
-                    "atk": int(evconfig.get("atk", 0)),
-                    "def": int(evconfig.get("def", 0)),
-                    "spa": int(evconfig.get("spa", 0)),
-                    "spd": int(evconfig.get("spd", 0)),
-                    "spe": int(evconfig.get("spe", 0)),
-                },
-                "usagePercent": 100.0,
-            }
-        )
+        spreads.append({
+            "nature": nature,
+            "evs": {
+                "hp": int(evconfig.get("hp", 0)),
+                "atk": int(evconfig.get("atk", 0)),
+                "def": int(evconfig.get("def", 0)),
+                "spa": int(evconfig.get("spa", 0)),
+                "spd": int(evconfig.get("spd", 0)),
+                "spe": int(evconfig.get("spe", 0)),
+            },
+            "usagePercent": 100.0,
+        })
 
     return {
         "speciesKey": species_key,
         "speciesId": species_key,
         "displayName": display_name,
         "slug": species_key,
-        "source": "smogon-fallback",
+        "source": source_label,
         "usageRank": 0,
         "usagePercent": 0.0,
         "sampleCount": 0,
@@ -437,12 +461,64 @@ def parse_smogon_page(species_key: str) -> dict | None:
     }
 
 
-def fetch_smogon_fallback(species_keys: list[str], workers: int) -> tuple[dict[str, dict], list[str]]:
+def fetch_smogon_gen(species_key: str, gen: str, target_format: str = "OU") -> dict | None:
+    """Fetch the {target_format} moveset for a species at the given gen.
+    Returns None if the page 404s or the format isn't present."""
+    url = f"https://www.smogon.com/dex/{gen}/pokemon/{species_key}/"
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            html = response.read().decode("utf-8", "ignore")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+    strategies = extract_strategies(html)
+    target = next((s for s in strategies if s.get("format") == target_format), None)
+    if not target or not target.get("movesets"):
+        return None
+    moveset = target["movesets"][0]
+    settings = extract_dex_settings(html)
+    dump = None
+    if settings:
+        for rpc_request, rpc_response in settings.get("injectRpcs", []):
+            if '"dump-pokemon"' in rpc_request:
+                dump = rpc_response
+                break
+    display_name = (dump or {}).get("pokemon", {}).get("name") or moveset.get("pokemon") or species_key
+    if compact(display_name) != compact(species_key):
+        return None
+    return shape_smogon_set(species_key, display_name, moveset, f"smogon-{target_format.lower()}-{gen}")
+
+
+def fetch_smogon_ou_cascade(species_key: str, gens: list[str]) -> dict | None:
+    """Try each gen in order, return the first OU set found."""
+    for gen in gens:
+        try:
+            entry = fetch_smogon_gen(species_key, gen, "OU")
+        except Exception:
+            continue
+        if entry is not None:
+            return entry
+    return None
+
+
+def fetch_smogon_fallback(
+    species_keys: list[str],
+    workers: int,
+    gens: list[str],
+    final_evo_keys: set[str] | None = None,
+) -> tuple[dict[str, dict], list[str]]:
     fallback_map: dict[str, dict] = {}
     missing: list[str] = []
+    if final_evo_keys is not None:
+        candidates = [k for k in species_keys if k in final_evo_keys]
+    else:
+        candidates = species_keys
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        future_map = {pool.submit(parse_smogon_page, key): key for key in species_keys}
+        future_map = {pool.submit(fetch_smogon_ou_cascade, key, gens): key for key in candidates}
         for future in concurrent.futures.as_completed(future_map):
             key = future_map[future]
             try:
@@ -455,6 +531,42 @@ def fetch_smogon_fallback(species_keys: list[str], workers: int) -> tuple[dict[s
             else:
                 fallback_map[key] = entry
     return fallback_map, sorted(missing)
+
+
+def realign_keys(input_map: dict[str, dict], canonical_by_compact: dict[str, str]) -> dict[str, dict]:
+    """Rewrite each entry's speciesKey to the canonical kebab-case form when the
+    compact-form keys match. Eliminates ranked-vs-team-builder slug collisions
+    like 'ironblaster' (ranked) vs 'iron-blaster' (team-builder)."""
+    if not canonical_by_compact:
+        return input_map
+    out: dict[str, dict] = {}
+    for key, entry in input_map.items():
+        canonical = canonical_by_compact.get(compact(key), key)
+        rewritten = dict(entry)
+        rewritten["speciesKey"] = canonical
+        if "slug" in rewritten:
+            rewritten["slug"] = rewritten.get("slug") or canonical
+        existing = out.get(canonical)
+        if existing is None:
+            out[canonical] = rewritten
+            continue
+        # When two pre-realign keys collide, prefer the richer display name
+        # (one containing a space or hyphen — the team-builder formatting)
+        # and union aliases.
+        existing_name = existing.get("displayName") or ""
+        new_name = rewritten.get("displayName") or ""
+        if (" " in new_name or "-" in new_name) and not (" " in existing_name or "-" in existing_name):
+            existing["displayName"] = new_name
+        existing_aliases = set(existing.get("aliases") or [])
+        existing_aliases.update(rewritten.get("aliases") or [])
+        existing["aliases"] = sorted(existing_aliases)
+        # Fill any null fields from the incoming entry.
+        for field in ("speciesId", "formName", "typeNames", "baseStats", "weightKg",
+                      "moves", "items", "abilities", "spreads",
+                      "source", "usageRank", "usagePercent", "sampleCount"):
+            if not existing.get(field) and rewritten.get(field):
+                existing[field] = rewritten[field]
+    return out
 
 
 def merge_species_maps(*maps: dict[str, dict]) -> dict[str, dict]:
@@ -483,9 +595,18 @@ def main() -> int:
     parser.add_argument("--showdown-pokedex", default="")
     parser.add_argument("--curated-sets", default="src/main/resources/data/deltacalc/usage/delta-curated-sets.json",
                         help="Optional JSON of hand-authored Delta sets; highest priority, overrides ranked for the same species.")
+    parser.add_argument("--auto-curated-sets", default="tools/database/generated/delta-auto-sets.generated.json",
+                        help="Optional JSON of auto-generated Delta defaults (build_default_delta_sets.py). "
+                             "Priority: manual curated > auto > ranked > Smogon > heuristic.")
+    parser.add_argument("--learnsets", default="tools/database/generated/learnsets.generated.json",
+                        help="Optional learnset index for curated-set legality checks; produced by build_learnsets.py.")
     parser.add_argument("--skip-smogon", action="store_true")
     parser.add_argument("--skip-heuristics", action="store_true",
                         help="Skip base-stat-derived spreads for species without a ranked or Smogon set.")
+    parser.add_argument("--smogon-gens", default=",".join(SMOGON_GEN_CASCADE),
+                        help="Comma-separated gen cascade for Smogon OU lookup (first hit wins).")
+    parser.add_argument("--smogon-include-non-final", action="store_true",
+                        help="Scrape Smogon OU even for non-final-evo species (default: final evos only).")
     parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
 
@@ -498,10 +619,24 @@ def main() -> int:
     showdown_pokedex = Path(args.showdown_pokedex) if args.showdown_pokedex else detect_showdown_pokedex()
     showdown_species = load_showdown_species(showdown_pokedex) if showdown_pokedex else {}
     external_species = load_external_species(Path(args.species_json)) if args.species_json else {}
-    species_map = merge_species_maps(showdown_species, ranked_species, external_species)
+    learnsets_species = load_learnsets_species(Path(args.learnsets)) if args.learnsets else {}
+    # Realign ranked entries' species keys to the canonical kebab-case form so
+    # 'ironblaster' (ranked compact slug) merges with 'iron-blaster' (team-builder).
+    canonical_by_compact = {compact(k): k for k in learnsets_species.keys()}
+    ranked_species = realign_keys(ranked_species, canonical_by_compact)
+    ranked_sets = realign_keys(ranked_sets, canonical_by_compact)
+    # Priority: learnsets (Delta team-builder + Showdown merged, authoritative for Delta types)
+    # > Showdown direct > ranked-scrape > external override.
+    species_map = merge_species_maps(learnsets_species, showdown_species, ranked_species, external_species)
 
     curated_sets = load_curated_sets(Path(args.curated_sets)) if args.curated_sets else {}
+    auto_curated_sets = load_curated_sets(Path(args.auto_curated_sets)) if args.auto_curated_sets else {}
+    learnset_index = load_learnset_index(Path(args.learnsets)) if args.learnsets else {}
+    legality_warnings = warn_curated_legality(curated_sets, learnset_index)
+    # Priority: manual curated > auto-curated > ranked. Apply lowest first, highest last.
     merged_delta_sets = dict(ranked_sets)
+    for key, entry in auto_curated_sets.items():
+        merged_delta_sets[key] = entry
     for key, entry in curated_sets.items():
         merged_delta_sets[key] = entry
 
@@ -509,7 +644,16 @@ def main() -> int:
     missing_smogon: list[str] = []
     if not args.skip_smogon:
         candidates = sorted(key for key in species_map.keys() if key not in merged_delta_sets)
-        smogon_map, missing_smogon = fetch_smogon_fallback(candidates, args.workers)
+        gens = [g.strip() for g in args.smogon_gens.split(",") if g.strip()]
+        final_evo_filter = None
+        if learnset_index and not args.smogon_include_non_final:
+            final_evo_filter = {
+                key for key, info in learnset_index.items()
+                if info.get("isFinalEvo") and not info.get("isStub")
+            }
+        smogon_map, missing_smogon = fetch_smogon_fallback(
+            candidates, args.workers, gens, final_evo_filter,
+        )
 
     heuristic_count = 0
     if not args.skip_heuristics:
@@ -562,9 +706,10 @@ def main() -> int:
     print(
         f"Wrote {len(dataset['species'])} species, "
         f"{len(dataset['deltaRanked'])} Delta ranked/curated defaults "
-        f"({len(curated_sets)} curated), "
+        f"({len(curated_sets)} manual curated, {len(auto_curated_sets)} auto-curated), "
         f"and {len(dataset['smogonFallback'])} fallback defaults "
-        f"({heuristic_count} heuristic)."
+        f"({heuristic_count} heuristic). "
+        f"Legality warnings: {legality_warnings}."
     )
     return 0
 

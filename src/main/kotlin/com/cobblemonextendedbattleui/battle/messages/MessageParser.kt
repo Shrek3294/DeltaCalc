@@ -21,11 +21,24 @@ object MessageParser {
     var lastMoveKey: String? = null
         private set
 
+    /**
+     * Whether the last tracked move's resolution phase is over (turn ended or attacker fainted).
+     * Used by DebugDumper to distinguish move-driven damage from end-of-turn passives
+     * (Toxic / Leech Seed / sandstorm) when pairing actual-damage events with calc estimates.
+     *
+     * - Set to false when a move is tracked (`trackMove`).
+     * - Set to true when a turn marker, faint, or send-out arrives (`markMoveResolved`).
+     * - Defaults to true so damage before any move (e.g. switch-in hazards) is correctly tagged.
+     */
+    var lastMoveResolved: Boolean = true
+        private set
+
     fun clearMoveTracking() {
         lastMoveUser = null
         lastMoveTarget = null
         lastMoveName = null
         lastMoveKey = null
+        lastMoveResolved = true
     }
 
     fun trackMove(user: String, moveName: String, moveKey: String?, target: String?) {
@@ -33,6 +46,15 @@ object MessageParser {
         lastMoveName = moveName
         lastMoveKey = moveKey
         lastMoveTarget = target
+        lastMoveResolved = false
+    }
+
+    /**
+     * Mark the most recently tracked move as resolved. Called on turn / faint / send-out messages
+     * so subsequent damage events (hazards, status ticks) aren't paired against the prior move.
+     */
+    fun markMoveResolved() {
+        lastMoveResolved = true
     }
 
     /**

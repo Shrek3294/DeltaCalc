@@ -1,14 +1,19 @@
 package com.cobblemonextendedbattleui.tracking
 
+import com.cobblemon.mod.common.api.pokemon.PokemonSpecies
 import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.battle.ClientBattlePokemon
 import com.cobblemon.mod.common.client.battle.ClientBattleSide
+import com.cobblemon.mod.common.pokemon.FormData
 import com.cobblemon.mod.common.pokemon.Pokemon
 import com.cobblemonextendedbattleui.BattleStateTracker
+import com.cobblemonextendedbattleui.CobblemonExtendedBattleUI
 import com.cobblemonextendedbattleui.TeamIndicatorUI
+import com.cobblemonextendedbattleui.battle.state.FormTracker
 import com.cobblemonextendedbattleui.compat.core.BattlePlatformAdapter
 import com.cobblemonextendedbattleui.compat.delta.DeltaBattleInfoReader
 import net.minecraft.client.MinecraftClient
+import net.minecraft.util.Identifier
 import java.util.UUID
 import kotlin.math.roundToInt
 
@@ -147,8 +152,26 @@ object BattleStateFacade {
         val baseSpeciesId = trackedSpeciesId ?: propertiesBase
         val trackedFormName = BattleStateTracker.getCurrentForm(uuid)?.currentForm
         val propertyFormName = properties.form?.takeIf { it.isNotBlank() }
-        val resolvedFormName = trackedFormName ?: propertyFormName ?: propertiesRegional
-        val actorForm = actorPokemon?.form
+        // For Ogerpon, the held mask determines the form even though there's no form-change message.
+        val heldItemForOgerpon = if (isPlayerSide) {
+            actorPokemon?.heldItem()?.takeIf { !it.isEmpty }?.name?.string
+        } else {
+            BattleStateTracker.getItem(uuid)?.name ?: deltaRevealData?.heldItem
+        }
+        val maskFormName = inferOgerponMaskFormName(baseSpeciesId, heldItemForOgerpon, trackedFormName ?: propertyFormName)
+        // Form-name precedence: tracker-confirmed > Ogerpon mask > properties.form > regional
+        // aspect stripped from properties.species. The regional aspect is the lowest priority
+        // because anything else is a stronger signal of the actual form.
+        val resolvedFormName = trackedFormName ?: maskFormName ?: propertyFormName ?: propertiesRegional
+        // If FormTracker has a recent form change (Aegislash Stance Change, Mega Evolution,
+        // Ogerpon mask), the actor's `form` reference often still points at the original form.
+        // Resolve the form via aspect lookup using the tracked form name so baseStats / types
+        // reflect the post-change form.
+        val actorForm = resolveCurrentForm(
+            speciesId = baseSpeciesId,
+            trackedFormName = trackedFormName ?: maskFormName,
+            fallbackForm = actorPokemon?.form
+        )
         val resolvedRevealedMoves = resolveRevealedMoves(
             uuid = uuid,
             displayName = displayName.string,
@@ -201,8 +224,20 @@ object BattleStateFacade {
         val trackedSpeciesId = BattleStateTracker.getSpeciesId(uuid)?.path
         val baseSpeciesId = trackedSpeciesId ?: species.resourceIdentifier.path
         val trackedFormName = BattleStateTracker.getCurrentForm(uuid)?.currentForm
-        val resolvedFormName = trackedFormName ?: form.name.takeIf { it.isNotBlank() }
         val heldItem = heldItem()
+        val maskFormName = inferOgerponMaskFormName(
+            baseSpeciesId,
+            if (!heldItem.isEmpty) heldItem.name.string else null,
+            trackedFormName ?: form.name.takeIf { it.isNotBlank() }
+        )
+        val resolvedFormName = trackedFormName ?: maskFormName ?: form.name.takeIf { it.isNotBlank() }
+        // Same form-override path as ClientBattlePokemon.toTruth: resolve via FormTracker
+        // first so Stance Change / Mega / Ogerpon mask reflect in baseStats and types.
+        val effectiveForm = resolveCurrentForm(
+            speciesId = baseSpeciesId,
+            trackedFormName = trackedFormName ?: maskFormName,
+            fallbackForm = form
+        ) ?: form
 
         return TrackedPokemonTruth(
             uuid = uuid,
@@ -211,8 +246,8 @@ object BattleStateFacade {
             speciesKey = canonicalSpeciesKey(baseSpeciesId, resolvedFormName),
             speciesLabel = canonicalSpeciesLabel(baseSpeciesId, getDisplayName().string, resolvedFormName),
             formName = resolvedFormName,
-            formTypeNames = listOfNotNull(form.primaryType?.name, form.secondaryType?.name),
-            formBaseStats = form.baseStats.let { stats ->
+            formTypeNames = listOfNotNull(effectiveForm.primaryType?.name, effectiveForm.secondaryType?.name),
+            formBaseStats = effectiveForm.baseStats.let { stats ->
                 TrackedBaseStats(
                     hp = stats[com.cobblemon.mod.common.api.pokemon.stats.Stats.HP] ?: 0,
                     atk = stats[com.cobblemon.mod.common.api.pokemon.stats.Stats.ATTACK] ?: 0,
@@ -273,6 +308,69 @@ object BattleStateFacade {
             statStages = statStages,
             moveList = emptyList()
         )
+    }
+
+    /**
+     * Resolve the FormData for a species + tracked form name (Aegislash Blade, Mega, Ogerpon mask, etc.).
+     *
+     * Cobblemon's `actorPokemon.form` reference often does NOT update mid-battle for client-side
+     * form swaps (Stance Change, Mega Evolution), so trusting it gives stale baseStats / types.
+     * Instead, when FormTracker has captured a form-change message we look up the matching form
+     * via `species.getForm(setOf(aspect))` using the same aspect candidates as `FormTracker`.
+     *
+     * Returns null when no form change is tracked, when the species is unknown, or when the
+     * aspect lookup doesn't resolve to a non-standard form. Callers fall back to the live
+     * actor form in that case.
+     */
+    private fun resolveCurrentForm(
+        speciesId: String?,
+        trackedFormName: String?,
+        fallbackForm: FormData?
+    ): FormData? {
+        if (trackedFormName.isNullOrBlank() || speciesId.isNullOrBlank()) return fallbackForm
+        val identifier = Identifier.tryParse(speciesId) ?: Identifier.of("cobblemon", speciesId)
+        val species = PokemonSpecies.getByIdentifier(identifier) ?: return fallbackForm
+        val standard = species.standardForm
+
+        for (aspect in FormTracker.formNameToAspects(trackedFormName)) {
+            val candidate = runCatching { species.getForm(setOf(aspect)) }.getOrNull() ?: continue
+            // A successful form lookup either returns a non-standard form, OR the standard form
+            // when the tracked aspect IS the standard one. Only override when we genuinely
+            // resolved to a different form than the fallback.
+            if (candidate != standard) {
+                CobblemonExtendedBattleUI.LOGGER.debug(
+                    "BattleStateFacade: resolved form '{}' for {} via aspect '{}' (atk={}, def={})",
+                    trackedFormName, speciesId, aspect,
+                    candidate.baseStats[com.cobblemon.mod.common.api.pokemon.stats.Stats.ATTACK],
+                    candidate.baseStats[com.cobblemon.mod.common.api.pokemon.stats.Stats.DEFENCE]
+                )
+                return candidate
+            }
+        }
+
+        // Tried all aspect candidates — nothing matched a non-standard form. Keep fallback.
+        return fallbackForm
+    }
+
+    /**
+     * Ogerpon's mask determines its form (Teal / Hearthflame / Wellspring / Cornerstone),
+     * which changes both base stats and the type of Ivy Cudgel. There's no form-change
+     * message — the form is fixed by which mask Ogerpon holds at battle start.
+     *
+     * If the tracked form name is empty but the held item is a mask, return the matching
+     * form name so `resolveCurrentForm` can pick the right form aspect.
+     */
+    private fun inferOgerponMaskFormName(speciesId: String?, heldItemName: String?, existingFormName: String?): String? {
+        if (existingFormName?.isNotBlank() == true) return existingFormName
+        if (speciesId == null || !speciesId.lowercase().contains("ogerpon")) return existingFormName
+        val item = heldItemName?.lowercase().orEmpty()
+        return when {
+            "hearthflame" in item -> "Hearthflame"
+            "wellspring" in item -> "Wellspring"
+            "cornerstone" in item -> "Cornerstone"
+            "teal" in item -> "Teal"
+            else -> existingFormName
+        }
     }
 
     private fun resolveRevealedMoves(

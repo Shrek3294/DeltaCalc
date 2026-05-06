@@ -169,8 +169,18 @@ object BestEffortDamageEngine : DamageEngine {
             assumedSpread = inferredSet.spread
         )
 
-        val playerContext = DamageContext(snapshot.weather, snapshot.terrain, snapshot.playerSide, snapshot.opponentSide)
-        val opponentContext = DamageContext(snapshot.weather, snapshot.terrain, snapshot.opponentSide, snapshot.playerSide)
+        val playerFainted = snapshot.playerTeam.count { it.uuid != snapshot.playerActiveUuid && it.currentHp <= 0 }
+        val opponentFainted = snapshot.opponentTeam.count { it.uuid != snapshot.opponentActiveUuid && it.currentHp <= 0 }
+        val playerContext = DamageContext(
+            snapshot.weather, snapshot.terrain,
+            snapshot.playerSide, snapshot.opponentSide,
+            attackerTeamFainted = playerFainted
+        )
+        val opponentContext = DamageContext(
+            snapshot.weather, snapshot.terrain,
+            snapshot.opponentSide, snapshot.playerSide,
+            attackerTeamFainted = opponentFainted
+        )
 
         val yourMoves = playerSnapshot.moveList.take(4).map { moveRef ->
             estimateMove(
@@ -366,9 +376,12 @@ object BestEffortDamageEngine : DamageEngine {
         }
 
         val bypassAbility = bypassesDefenderAbility(attacker.abilityName) || moveBypassesDefenderAbility(template)
+        val moveNameNormalized = normalizeToken(template.name)
         var effectiveness = defender.snapshot.typeNames
             .mapNotNull { ElementalTypes.get(it.lowercase()) }
-            .fold(1.0) { acc, defendingType -> acc * AIUtility.getDamageMultiplier(moveType, defendingType) }
+            .fold(1.0) { acc, defendingType ->
+                acc * moveTypeChartMultiplier(moveNameNormalized, moveType, defendingType)
+            }
 
         if (!bypassAbility) {
             effectiveness *= abilityTypeModifier(defender.abilityName, moveTypeName)
@@ -440,10 +453,32 @@ object BestEffortDamageEngine : DamageEngine {
             warnings += "Multi-hit ($hitLabel)"
         }
 
-        val minDamage = damageRolls.first() * minHits
-        val maxDamage = damageRolls.last() * maxHits
-        val critMinDamage = critDamageRolls.first() * minHits
-        val critMaxDamage = critDamageRolls.last() * maxHits
+        var minDamage = damageRolls.first() * minHits
+        var maxDamage = damageRolls.last() * maxHits
+        var critMinDamage = critDamageRolls.first() * minHits
+        var critMaxDamage = critDamageRolls.last() * maxHits
+
+        // Sturdy: when defender is at full HP, any single attack that would faint it leaves
+        // it at 1 HP instead. Caps the predicted damage range to (maxHp - 1) so the calc
+        // doesn't lie about an OHKO that wouldn't actually KO. Bypassed by Mold Breaker
+        // and friends (already wired via `bypassAbility` for type-chart purposes; reuse here).
+        val sturdyActive = !bypassAbility &&
+            normalizeToken(defender.abilityName) == "sturdy" &&
+            defenderAtFullHp &&
+            defenderMaxHp > 0
+        if (sturdyActive) {
+            val cap = defenderMaxHp - 1
+            if (maxDamage >= defenderMaxHp) {
+                maxDamage = cap
+                if (minDamage > cap) minDamage = cap
+                warnings += "Sturdy survives at 1 HP"
+            }
+            if (critMaxDamage >= defenderMaxHp) {
+                critMaxDamage = cap
+                if (critMinDamage > cap) critMinDamage = cap
+            }
+        }
+
         val minPercent = damagePercent(minDamage, defenderMaxHp)
         val maxPercent = damagePercent(maxDamage, defenderMaxHp)
         val koLabel = koLabel(defenderCurrentHp, minDamage, maxDamage)
@@ -560,6 +595,30 @@ object BestEffortDamageEngine : DamageEngine {
         }
     }
 
+    /**
+     * Type-chart multiplier with per-move overrides for canon special-case interactions
+     * (Freeze Dry, etc.). Falls back to the vanilla `AIUtility.getDamageMultiplier` for
+     * everything else.
+     *
+     * Overrides:
+     *  - **Freeze Dry**: Ice move that hits Water for 2× instead of 0.5×.
+     *
+     * Add new overrides here when the canonical type chart isn't enough.
+     */
+    private fun moveTypeChartMultiplier(
+        moveNameNormalized: String,
+        moveType: com.cobblemon.mod.common.api.types.ElementalType,
+        defendingType: com.cobblemon.mod.common.api.types.ElementalType
+    ): Double {
+        if (moveNameNormalized == "freezedry" &&
+            defendingType.name.equals("water", ignoreCase = true)
+        ) {
+            // Bypasses Water's normal Ice resist — explicitly 2× super effective.
+            return 2.0
+        }
+        return AIUtility.getDamageMultiplier(moveType, defendingType)
+    }
+
     private fun resolveMoveTypeName(template: MoveTemplate, attacker: DamageCombatant, context: DamageContext): String {
         BattleMoveSupport.resolveIvyCudgelTypeName(
             moveIdOrName = template.name,
@@ -661,8 +720,50 @@ object BestEffortDamageEngine : DamageEngine {
             "lowkick", "grassknot" -> weightBasedPower(defender)
             "heavyslam", "heatcrash" -> weightRatioPower(attacker, defender)
             "acrobatics" -> if (attacker.itemName.isNullOrBlank()) template.power * 2.0 else template.power
+            "knockoff" -> {
+                // Canon: Knock Off is ×1.5 BP when target holds a knockable item.
+                // We approximate "knockable" = "has any item the calc knows about".
+                // Excludes mega stones held by their matching mega-evolved species
+                // (those can't be knocked off in canon) and Arceus plates / Silvally memories.
+                if (defenderHasKnockableItem(defender)) template.power * 1.5 else template.power
+            }
             else -> template.power
         }
+    }
+
+    /**
+     * True when Knock Off should get its ×1.5 power boost — defender holds a "knockable" item.
+     *
+     * Canon exclusions (item stays / can't be knocked off):
+     *  - Mega stones on a species that has Mega Evolved (they're consumed by mega evolution).
+     *  - Arceus plates, Silvally memories, Genesect drives, Giratina Griseous Orb,
+     *    Dialga Adamant Orb, Palkia Lustrous Orb (form-locked items).
+     *  - Z-crystals (not really removable mid-battle).
+     *
+     * Anything else: assume knockable. False positives are minor (rare items); false negatives
+     * (predicting weak Knock Off when target had a knockable item) hurt the calc more.
+     */
+    private fun defenderHasKnockableItem(defender: DamageCombatant): Boolean {
+        val item = defender.itemName?.takeIf { it.isNotBlank() } ?: return false
+        val itemNorm = normalizeToken(item)
+        val speciesNorm = normalizeToken(defender.snapshot.speciesId ?: defender.snapshot.speciesKey)
+
+        // Mega stones — locked to the matching species mid-battle.
+        if (itemNorm.endsWith("ite") || itemNorm.endsWith("itex") || itemNorm.endsWith("itey")) {
+            return false
+        }
+        // Arceus plates, Silvally memories — form-locked.
+        if ("plate" in itemNorm && "arceus" in speciesNorm) return false
+        if ("memory" in itemNorm && "silvally" in speciesNorm) return false
+        // Genesect drives, Giratina Griseous Orb, etc.
+        if ("drive" in itemNorm && "genesect" in speciesNorm) return false
+        if ("griseousorb" in itemNorm) return false
+        if ("adamantorb" in itemNorm) return false
+        if ("lustrousorb" in itemNorm) return false
+        // Z-crystals (any "Z" suffix item like "Firium Z").
+        if (itemNorm.endsWith("z") && itemNorm.length >= 5 && itemNorm.contains("ium")) return false
+
+        return true
     }
 
     private fun sumPositiveStages(combatant: DamageCombatant): Int {
@@ -727,7 +828,20 @@ object BestEffortDamageEngine : DamageEngine {
             category == DamageCategories.PHYSICAL -> sourceCombatant.snapshot.stageFor("atk")
             else -> sourceCombatant.snapshot.stageFor("spa")
         }
-        val stage = if (isCrit) maxOf(0, rawStage) else rawStage
+        // Spectral Thief steals the defender's positive stat stages BEFORE dealing damage,
+        // so the effective attacker stage at hit time is `max(attackerStage, defenderStage)`
+        // for whichever attacking stat applies. The state-tracker only applies the steal AFTER
+        // the move resolves, so the panel's pre-move estimate has to model this manually.
+        val effectiveStage = if (moveName == "spectralthief" && !usesDefenderAtk) {
+            val defenderStage = when {
+                category == DamageCategories.PHYSICAL -> defender.snapshot.stageFor("atk")
+                else -> defender.snapshot.stageFor("spa")
+            }
+            if (defenderStage > 0) rawStage + defenderStage else rawStage
+        } else {
+            rawStage
+        }
+        val stage = if (isCrit) maxOf(0, effectiveStage) else effectiveStage
         var value = StatCalculator.applyStageMultiplier(baseAttack, stage)
         val itemHolder = if (usesDefenderAtk) defender else attacker
         value = when (category) {
@@ -899,6 +1013,12 @@ object BestEffortDamageEngine : DamageEngine {
             "transistor" -> if (normalizeToken(moveTypeName) == "electric") 1.3 else 1.0
             "rockypayload" -> if (normalizeToken(moveTypeName) == "rock") 1.5 else 1.0
             "aerilate", "pixilate", "refrigerate", "galvanize" -> pixelateBoost(template, attacker)
+            "supremeoverlord" -> {
+                // Powers up moves by 10% per fainted teammate (max +50% at 5 fainted).
+                // Multiplicative on top of any other ability factors.
+                val fainted = context.attackerTeamFainted.coerceIn(0, 5)
+                1.0 + 0.1 * fainted
+            }
             else -> 1.0
         }
     }
@@ -1073,6 +1193,8 @@ object BestEffortDamageEngine : DamageEngine {
         val weather: String?,
         val terrain: String?,
         val attackerSide: CalcSideState,
-        val defenderSide: CalcSideState
+        val defenderSide: CalcSideState,
+        /** Number of attacker's non-active teammates currently at 0 HP. Used by Supreme Overlord. */
+        val attackerTeamFainted: Int = 0
     )
 }

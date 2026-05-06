@@ -442,12 +442,21 @@ object MoveTooltipRenderer {
         val weatherBallType = getWeatherBallEffectiveType(move.moveTemplate)
         val moveType = weatherBallType ?: baseType
         val isStatusMove = move.moveTemplate.damageCategory == DamageCategories.STATUS
+        // Match DamageEngine.moveTypeChartMultiplier overrides so the tooltip preview agrees
+        // with the actual damage calc. Currently: Freeze Dry hits Water for 2× instead of 0.5×.
+        val moveNameNormalized = move.moveTemplate.name.lowercase()
+            .replace(" ", "").replace("-", "").replace("_", "").replace("'", "").replace(".", "")
 
         for (opponent in opponents) {
             val types = getOpponentEffectiveTypes(opponent)
             if (types.isEmpty()) continue
             var multiplier = 1.0
-            for (defType in types) multiplier *= AIUtility.getDamageMultiplier(moveType, defType)
+            for (defType in types) {
+                val raw = AIUtility.getDamageMultiplier(moveType, defType)
+                multiplier *= if (moveNameNormalized == "freezedry" &&
+                    defType.name.equals("water", ignoreCase = true)
+                ) 2.0 else raw
+            }
             if (isStatusMove && multiplier != 0.0) continue
 
             val opponentName = opponent.displayName.string
