@@ -15,6 +15,14 @@ import java.util.UUID
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
+enum class OverrideRow { ITEM, ABILITY, SPREAD }
+
+data class OpponentOverride(
+    val itemIndex: Int? = null,
+    val abilityIndex: Int? = null,
+    val spreadIndex: Int? = null
+)
+
 object CalcComputationService {
     private val platformAdapter = DeltaBattlePlatformAdapter
     private val battleDatabase = BattleDatabase.loadDefault()
@@ -24,11 +32,15 @@ object CalcComputationService {
     private val damageEngine: DamageEngine = BestEffortDamageEngine
     private var currentModel: CalcRenderModel? = null
     private var lastSelectionFingerprint: String = ""
+    // Ephemeral, per-opponent-UUID overrides for inferred Item / Ability / Spread.
+    // Cleared when no battle is active (see currentModel() null branch).
+    private val overrides = mutableMapOf<UUID, OpponentOverride>()
 
     fun currentModel(): CalcRenderModel? {
         val truth = BattleStateFacade.capture(platformAdapter) ?: run {
             currentModel = null
             lastSelectionFingerprint = ""
+            overrides.clear()
             return null
         }
 
@@ -40,13 +52,14 @@ object CalcComputationService {
             val selectedPlayer = snapshot.findPlayer(selection.playerUuid) ?: snapshot.playerActive
             val selectedOpponent = snapshot.findOpponent(selection.opponentUuid) ?: snapshot.opponentActive
             val inferredSet = inferenceService.infer(snapshot, selectedOpponent, battleDatabase)
+            val effectiveSet = applyOverride(inferredSet, selectedOpponent)
             val reasons = invalidationCoordinator.consumeReasons()
             val switchPreview = buildSwitchPreview(selectedPlayer, snapshot)
             val damageResult = damageEngine.compute(
                 snapshot = snapshot,
                 playerSnapshot = selectedPlayer,
                 opponentSnapshot = selectedOpponent,
-                inferredSet = inferredSet,
+                inferredSet = effectiveSet,
                 playerEffectiveCurrentHp = switchPreview.effectiveCurrentHp,
                 emphasizeSelectedMove = selectedPlayer?.uuid == snapshot.playerActiveUuid
             )
@@ -81,11 +94,11 @@ object CalcComputationService {
                 switchSummaryText = switchPreview.summaryText,
                 hazardNoteText = switchPreview.hazardNoteText,
                 isPreview = selectedPlayer?.uuid != snapshot.playerActiveUuid || selectedOpponent?.uuid != snapshot.opponentActiveUuid,
-                opponentSet = inferredSet,
+                opponentSet = effectiveSet,
                 yourMoves = damageResult.yourMoves.map(::toRow),
                 opponentMoves = damageResult.opponentMoves.map(::toRow),
                 statusText = listOfNotNull(reasonText, warningText).joinToString(" | "),
-                speedText = buildSpeedText(selectedPlayer, selectedOpponent, inferredSet),
+                speedText = buildSpeedText(selectedPlayer, selectedOpponent, effectiveSet),
                 debugText = debugText
             )
             lastSelectionFingerprint = selectionFingerprint
@@ -102,6 +115,90 @@ object CalcComputationService {
     fun selectOpponentPreview(uuid: UUID?) {
         previewSelectionState.selectOpponent(uuid)
         currentModel = null
+    }
+
+    fun cycleItem(uuid: UUID, alternativesSize: Int) = cycle(uuid, OverrideRow.ITEM, alternativesSize)
+    fun cycleAbility(uuid: UUID, alternativesSize: Int) = cycle(uuid, OverrideRow.ABILITY, alternativesSize)
+    fun cycleSpread(uuid: UUID, alternativesSize: Int) = cycle(uuid, OverrideRow.SPREAD, alternativesSize)
+
+    fun resetOverride(uuid: UUID, row: OverrideRow) {
+        val existing = overrides[uuid] ?: return
+        val updated = when (row) {
+            OverrideRow.ITEM -> existing.copy(itemIndex = null)
+            OverrideRow.ABILITY -> existing.copy(abilityIndex = null)
+            OverrideRow.SPREAD -> existing.copy(spreadIndex = null)
+        }
+        if (updated == OpponentOverride()) overrides.remove(uuid) else overrides[uuid] = updated
+        currentModel = null
+    }
+
+    fun hasOverride(uuid: UUID, row: OverrideRow): Boolean {
+        val o = overrides[uuid] ?: return false
+        return when (row) {
+            OverrideRow.ITEM -> o.itemIndex != null
+            OverrideRow.ABILITY -> o.abilityIndex != null
+            OverrideRow.SPREAD -> o.spreadIndex != null
+        }
+    }
+
+    private fun cycle(uuid: UUID, row: OverrideRow, alternativesSize: Int) {
+        if (alternativesSize <= 1) return
+        val existing = overrides[uuid] ?: OpponentOverride()
+        val current = when (row) {
+            OverrideRow.ITEM -> existing.itemIndex
+            OverrideRow.ABILITY -> existing.abilityIndex
+            OverrideRow.SPREAD -> existing.spreadIndex
+        }
+        // Cycle: no-override -> 1 -> 2 -> ... -> (size-1) -> no-override.
+        // Index 0 is the inferred default, represented by null (no override stored).
+        val next: Int? = when {
+            current == null -> 1
+            current + 1 >= alternativesSize -> null
+            else -> current + 1
+        }
+        val updated = when (row) {
+            OverrideRow.ITEM -> existing.copy(itemIndex = next)
+            OverrideRow.ABILITY -> existing.copy(abilityIndex = next)
+            OverrideRow.SPREAD -> existing.copy(spreadIndex = next)
+        }
+        if (updated == OpponentOverride()) overrides.remove(uuid) else overrides[uuid] = updated
+        currentModel = null
+    }
+
+    private fun applyOverride(inferredSet: EffectiveBattleSet, opponent: CalcPokemonSnapshot?): EffectiveBattleSet {
+        val uuid = opponent?.uuid ?: return inferredSet
+        val override = overrides[uuid] ?: return inferredSet
+
+        // Real reveals always beat overrides — if the battle log has revealed item/ability,
+        // the inferred state is already REVEALED and we leave it alone.
+        val newItem = override.itemIndex
+            ?.takeIf { opponent.itemName == null && it < inferredSet.itemAlternatives.size }
+            ?.let { inferredSet.itemAlternatives[it] to InferenceValueState.REVEALED }
+            ?: inferredSet.item
+
+        val newAbility = override.abilityIndex
+            ?.takeIf { opponent.abilityName == null && it < inferredSet.abilityAlternatives.size }
+            ?.let { inferredSet.abilityAlternatives[it] to InferenceValueState.REVEALED }
+            ?: inferredSet.ability
+
+        val (newSpread, newSpreadLabel) = override.spreadIndex
+            ?.takeIf { it < inferredSet.spreadAlternatives.size }
+            ?.let {
+                val s = inferredSet.spreadAlternatives[it].copy(state = InferenceValueState.REVEALED)
+                s to "${s.nature} ${formatSpreadEvs(s.evs)}"
+            }
+            ?: (inferredSet.spread to inferredSet.spreadLabel)
+
+        return inferredSet.copy(
+            item = newItem,
+            ability = newAbility,
+            spread = newSpread,
+            spreadLabel = newSpreadLabel
+        )
+    }
+
+    private fun formatSpreadEvs(evs: CalcStats): String {
+        return listOf(evs.hp, evs.atk, evs.def, evs.spa, evs.spd, evs.spe).joinToString("/") { it.toString() }
     }
 
     private fun toRow(estimate: DamageEstimate): CalcMoveRow {

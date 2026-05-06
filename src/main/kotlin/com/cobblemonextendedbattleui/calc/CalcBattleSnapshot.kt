@@ -136,7 +136,12 @@ data class EffectiveBattleSet(
     val spread: InferenceSpread?,
     val spreadLabel: String?,
     val sourceLabel: String,
-    val moves: List<InferenceMoveSlot>
+    val moves: List<InferenceMoveSlot>,
+    // Cyclable alternatives drawn from usage stats, top-N deduped.
+    // Index 0 is the inferred default; cycling wraps back to no-override.
+    val itemAlternatives: List<String> = emptyList(),
+    val abilityAlternatives: List<String> = emptyList(),
+    val spreadAlternatives: List<InferenceSpread> = emptyList()
 )
 
 enum class DamageConfidence {

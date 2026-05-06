@@ -91,6 +91,30 @@ class OpponentInferenceService {
             )
             .map { it.slot }
 
+        val itemAlternatives = usage.items
+            .map { it.displayName }
+            .distinctBy(::normalizeToken)
+            .take(5)
+        val abilityAlternatives = usage.abilities
+            .map { it.displayName }
+            .distinctBy(::normalizeToken)
+            .take(5)
+        val spreadAlternatives = usage.spreads.take(5).map { entry ->
+            InferenceSpread(
+                nature = entry.nature,
+                evs = CalcStats(
+                    hp = entry.evs["hp"] ?: 0,
+                    atk = entry.evs["atk"] ?: 0,
+                    def = entry.evs["def"] ?: 0,
+                    spa = entry.evs["spa"] ?: 0,
+                    spd = entry.evs["spd"] ?: 0,
+                    spe = entry.evs["spe"] ?: 0
+                ),
+                state = InferenceValueState.GUESSED,
+                confidenceLabel = confidenceLabel(entry.usagePercent)
+            )
+        }
+
         return EffectiveBattleSet(
             speciesId = species?.speciesKey ?: usage.speciesKey,
             item = (opponent.itemName ?: usage.items.firstOrNull()?.displayName) to if (opponent.itemName != null) InferenceValueState.REVEALED else InferenceValueState.GUESSED,
@@ -98,7 +122,10 @@ class OpponentInferenceService {
             spread = spread,
             spreadLabel = spread?.let { "${it.nature} ${formatSpread(it.evs)}" },
             sourceLabel = sourceLabel(usage.source),
-            moves = orderedMoves
+            moves = orderedMoves,
+            itemAlternatives = itemAlternatives,
+            abilityAlternatives = abilityAlternatives,
+            spreadAlternatives = spreadAlternatives
         )
     }
 
