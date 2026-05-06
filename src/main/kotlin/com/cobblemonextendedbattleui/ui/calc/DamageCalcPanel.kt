@@ -95,7 +95,7 @@ object DamageCalcPanel {
         val fullHeight = CalcPanelState.height ?: DEFAULT_HEIGHT
         val height = if (CalcPanelState.expanded) fullHeight else COLLAPSED_HEIGHT
         val x = CalcPanelState.x ?: (screenWidth - width - 14)
-        val y = CalcPanelState.y ?: 18
+        val y = CalcPanelState.y ?: 100
 
         lastBounds = intArrayOf(x, y, width, height)
         handleInput(mc, x, y, width, height)

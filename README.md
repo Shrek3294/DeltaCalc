@@ -4,7 +4,7 @@ DeltaCalc is a client-side utility mod for Cobblemon Delta on Fabric 1.21.1. It 
 
 ## Features
 
-- Live damage calculation panel for active battle states
+- Live damage calculation panel for active battle states (left-click and drag the header to reposition; position is saved automatically)
 - Battle info overlays for weather, terrain, side conditions, and boosts
 - Team indicators and enriched Pokemon move/tooltips
 - Battle log enhancements
