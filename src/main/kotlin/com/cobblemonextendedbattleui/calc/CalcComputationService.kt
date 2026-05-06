@@ -53,7 +53,8 @@ object CalcComputationService {
         if (snapshotChanged || currentModel == null || lastSelectionFingerprint != selectionFingerprint) {
             val selectedPlayer = snapshot.findPlayer(selection.playerUuid) ?: snapshot.playerActive
             val selectedOpponent = snapshot.findOpponent(selection.opponentUuid) ?: snapshot.opponentActive
-            val inferredSet = inferenceService.infer(snapshot, selectedOpponent, battleDatabase)
+            val rawInferredSet = inferenceService.infer(snapshot, selectedOpponent, battleDatabase)
+            val inferredSet = expandAlternatives(rawInferredSet, selectedOpponent)
             val overrideMerged = applyOverride(inferredSet, selectedOpponent)
             // When the effective item is a mega stone, swap the opponent's
             // species data to its mega form so damage / speed / types reflect
@@ -207,6 +208,68 @@ object CalcComputationService {
 
     private fun formatSpreadEvs(evs: CalcStats): String {
         return listOf(evs.hp, evs.atk, evs.def, evs.spa, evs.spd, evs.spe).joinToString("/") { it.toString() }
+    }
+
+    // Curated list of common competitive items appended to per-species usage
+    // alternatives so every mon has a reasonable cycle even when usage data
+    // is thin (e.g. low-tier or custom species). Order is roughly "most
+    // versatile / most-frequently-correct guess" first.
+    private val COMMON_ITEMS = listOf(
+        "Leftovers", "Life Orb", "Heavy-Duty Boots",
+        "Choice Band", "Choice Specs", "Choice Scarf",
+        "Assault Vest", "Focus Sash", "Rocky Helmet",
+        "Eviolite", "Air Balloon", "Black Sludge"
+    )
+
+    /**
+     * Expands the inferred alternatives lists so the cycle UI always has
+     * something to scroll through:
+     * - Abilities: merges usage-stat ranking with the species' full legal
+     *   ability set from Cobblemon's PokemonSpecies API. Mons whose usage
+     *   only shows one ability (Ferrothorn -> Iron Barbs) gain Anticipation
+     *   / hidden abilities as cycle options.
+     * - Items: appends a curated list of common competitive items deduped
+     *   against the usage-stat alternatives, so even custom / niche mons
+     *   have multiple options to cycle through.
+     */
+    private fun expandAlternatives(
+        inferredSet: EffectiveBattleSet,
+        opponent: CalcPokemonSnapshot?
+    ): EffectiveBattleSet {
+        opponent ?: return inferredSet
+
+        // Abilities: pull species.abilities and append any legal ones not
+        // already covered by usage stats. Defensive lookup so delta species
+        // or species missing form data fall back to usage-only.
+        val expandedAbilities = run {
+            val identifier = opponent.speciesId?.let { resolveSpeciesIdentifier(it) }
+            val species = identifier?.let { PokemonSpecies.getByIdentifier(it) }
+            val speciesAbilities = species?.let {
+                runCatching { it.abilities.mapNotNull { ab -> ab.template.name } }.getOrNull()
+            } ?: emptyList()
+            if (speciesAbilities.isEmpty()) {
+                inferredSet.abilityAlternatives
+            } else {
+                val knownNorm = inferredSet.abilityAlternatives.map(::normalizeToken).toSet()
+                val additions = speciesAbilities
+                    .filter { normalizeToken(it) !in knownNorm }
+                    .distinctBy(::normalizeToken)
+                    .map { name -> name.split(" ", "-", "_").joinToString(" ") { tok -> tok.replaceFirstChar { c -> c.uppercaseChar() } } }
+                (inferredSet.abilityAlternatives + additions).take(6)
+            }
+        }
+
+        // Items: append curated common items deduped against usage alternatives.
+        val knownItemsNorm = inferredSet.itemAlternatives.map(::normalizeToken).toSet()
+        val additionalItems = COMMON_ITEMS.filter { normalizeToken(it) !in knownItemsNorm }
+        val expandedItems = (inferredSet.itemAlternatives + additionalItems)
+            .distinctBy(::normalizeToken)
+            .take(8)
+
+        return inferredSet.copy(
+            itemAlternatives = expandedItems,
+            abilityAlternatives = expandedAbilities
+        )
     }
 
     // Curated mega-stone -> form-aspect map. Most stones map to the "mega"
