@@ -176,17 +176,27 @@ object CalcComputationService {
 
     private fun applyOverride(inferredSet: EffectiveBattleSet, opponent: CalcPokemonSnapshot?): EffectiveBattleSet {
         val uuid = opponent?.uuid ?: return inferredSet
-        val override = overrides[uuid] ?: return inferredSet
+        val existing = overrides[uuid] ?: return inferredSet
 
-        // Real reveals always beat overrides — if the battle log has revealed item/ability,
-        // the inferred state is already REVEALED and we leave it alone.
+        // Real reveals always beat overrides. Purge override entries that the
+        // battle log has now superseded so the MANUAL pill / asterisk doesn't
+        // mislead — once the item or ability is real-revealed, hasOverride
+        // should return false for that row and the cycle UI should hide.
+        val purgedItemIndex = if (opponent.itemName != null) null else existing.itemIndex
+        val purgedAbilityIndex = if (opponent.abilityName != null) null else existing.abilityIndex
+        val purged = existing.copy(itemIndex = purgedItemIndex, abilityIndex = purgedAbilityIndex)
+        if (purged != existing) {
+            if (purged == OpponentOverride()) overrides.remove(uuid) else overrides[uuid] = purged
+        }
+        val override = purged
+
         val newItem = override.itemIndex
-            ?.takeIf { opponent.itemName == null && it < inferredSet.itemAlternatives.size }
+            ?.takeIf { it < inferredSet.itemAlternatives.size }
             ?.let { inferredSet.itemAlternatives[it] to InferenceValueState.REVEALED }
             ?: inferredSet.item
 
         val newAbility = override.abilityIndex
-            ?.takeIf { opponent.abilityName == null && it < inferredSet.abilityAlternatives.size }
+            ?.takeIf { it < inferredSet.abilityAlternatives.size }
             ?.let { inferredSet.abilityAlternatives[it] to InferenceValueState.REVEALED }
             ?: inferredSet.ability
 

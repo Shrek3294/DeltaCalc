@@ -196,8 +196,15 @@ object DamageCalcPanel {
             val itemOverridden = opponentUuid?.let { CalcComputationService.hasOverride(it, OverrideRow.ITEM) } ?: false
             val abilityOverridden = opponentUuid?.let { CalcComputationService.hasOverride(it, OverrideRow.ABILITY) } ?: false
             val spreadOverridden = opponentUuid?.let { CalcComputationService.hasOverride(it, OverrideRow.SPREAD) } ?: false
-            val itemHasAlts = model.opponentSet.itemAlternatives.size > 1
-            val abilityHasAlts = model.opponentSet.abilityAlternatives.size > 1
+            // A row is "battle-revealed" (locked) when its inference state is
+            // REVEALED and the user hasn't overridden it. Real reveals beat
+            // overrides downstream, so cycling them does nothing visible —
+            // hide the arrows and disable the click target to avoid the
+            // misleading "I clicked but nothing happened" feedback.
+            val itemRealRevealed = !itemOverridden && model.opponentSet.item.second == InferenceValueState.REVEALED
+            val abilityRealRevealed = !abilityOverridden && model.opponentSet.ability.second == InferenceValueState.REVEALED
+            val itemHasAlts = !itemRealRevealed && model.opponentSet.itemAlternatives.size > 1
+            val abilityHasAlts = !abilityRealRevealed && model.opponentSet.abilityAlternatives.size > 1
             val spreadHasAlts = model.opponentSet.spreadAlternatives.size > 1
             val rowHeight = s(11).coerceAtLeast(8)
             val pillX = cellX + cellW - s(34).coerceAtLeast(18)
@@ -214,10 +221,11 @@ object DamageCalcPanel {
                 UIUtils.drawText(context, "<", backX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
                 UIUtils.drawText(context, ">", forwardX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
                 lastItemBackBounds = intArrayOf(backX - 1, textY - 2, backZoneW, rowHeight)
+                lastItemRowBounds = intArrayOf(cellX + 4, textY - 2, cellW - 8, rowHeight)
             } else {
                 lastItemBackBounds = intArrayOf(0, 0, 0, 0)
+                lastItemRowBounds = intArrayOf(0, 0, 0, 0)
             }
-            lastItemRowBounds = intArrayOf(cellX + 4, textY - 2, cellW - 8, rowHeight)
             textY += s(10)
 
             val abilityValue = formatInference(model.opponentSet.ability.first)
@@ -229,10 +237,11 @@ object DamageCalcPanel {
                 UIUtils.drawText(context, "<", backX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
                 UIUtils.drawText(context, ">", forwardX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
                 lastAbilityBackBounds = intArrayOf(backX - 1, textY - 2, backZoneW, rowHeight)
+                lastAbilityRowBounds = intArrayOf(cellX + 4, textY - 2, cellW - 8, rowHeight)
             } else {
                 lastAbilityBackBounds = intArrayOf(0, 0, 0, 0)
+                lastAbilityRowBounds = intArrayOf(0, 0, 0, 0)
             }
-            lastAbilityRowBounds = intArrayOf(cellX + 4, textY - 2, cellW - 8, rowHeight)
             textY += s(10)
 
             // Spread row stays visible even in compact mode so users can still
