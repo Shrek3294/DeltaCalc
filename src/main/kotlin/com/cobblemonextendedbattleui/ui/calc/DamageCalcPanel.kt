@@ -81,6 +81,10 @@ object DamageCalcPanel {
     private var lastContentHeight: Int = 0
     private var lastContentViewportTop: Int = 0
     private var lastContentViewportBottom: Int = 0
+    // Scrollbar thumb drag state.
+    private var isScrollbarDragging = false
+    private var scrollDragStartMouseY = 0
+    private var scrollDragStartOffset = 0
 
     private var wasMouseDown = false
     private var wasRightMouseDown = false
@@ -115,6 +119,7 @@ object DamageCalcPanel {
             pendingTabSelection = null
             pendingSectionToggle = null
             pendingOverrideClick = null
+            isScrollbarDragging = false
             return
         }
 
@@ -389,11 +394,15 @@ object DamageCalcPanel {
     }
 
     fun onScroll(mouseX: Double, mouseY: Double, deltaY: Double): Boolean {
+        // The mixin hands us raw window-pixel coords; convert to scaled GUI
+        // coords so the bounds check matches lastBounds (which is already scaled).
+        val mc = MinecraftClient.getInstance()
+        val scaledX = (mouseX * mc.window.scaledWidth / mc.window.width).toInt()
+        val scaledY = (mouseY * mc.window.scaledHeight / mc.window.height).toInt()
         val (x, y, width, height) = lastBounds
-        if (!contains(mouseX.toInt(), mouseY.toInt(), x, y, width, height)) {
+        if (!contains(scaledX, scaledY, x, y, width, height)) {
             return false
         }
-        val mc = MinecraftClient.getInstance()
         val handle = mc.window.handle
         val isCtrlDown = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS ||
             GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS
@@ -437,6 +446,19 @@ object DamageCalcPanel {
 
         if (mouseDown) {
             when {
+                isScrollbarDragging -> {
+                    summaryClickArmed = false
+                    pendingTabSelection = null
+                    pendingSectionToggle = null
+                    pendingOverrideClick = null
+                    val viewportHeight = (lastContentViewportBottom - lastContentViewportTop).coerceAtLeast(0)
+                    contentScrollOffset = contentScrollbar.dragToScrollOffset(
+                        dragDeltaY = mouseY - scrollDragStartMouseY,
+                        dragStartOffset = scrollDragStartOffset,
+                        contentHeight = lastContentHeight,
+                        visibleHeight = viewportHeight
+                    )
+                }
                 interaction.isDragging -> {
                     summaryClickArmed = false
                     pendingTabSelection = null
@@ -469,7 +491,33 @@ object DamageCalcPanel {
                     val clickedPlayerTab = findTabAt(mouseX, mouseY, lastPlayerTabBounds)
                     val clickedOpponentTab = findTabAt(mouseX, mouseY, lastOpponentTabBounds)
                     val rowsClickable = CalcPanelState.expanded && CalcPanelState.summaryExpanded
-                    if (resizeZone != UIUtils.ResizeZone.NONE) {
+                    val viewportHeight = (lastContentViewportBottom - lastContentViewportTop).coerceAtLeast(0)
+                    val scrollableContent = lastContentHeight > viewportHeight
+                    if (scrollableContent && contentScrollbar.isOverThumb(mouseX, mouseY)) {
+                        // Begin thumb drag.
+                        summaryClickArmed = false
+                        pendingTabSelection = null
+                        pendingSectionToggle = null
+                        pendingOverrideClick = null
+                        isScrollbarDragging = true
+                        scrollDragStartMouseY = mouseY
+                        scrollDragStartOffset = contentScrollOffset
+                    } else if (scrollableContent && contentScrollbar.isOverTrack(mouseX, mouseY)) {
+                        // Click empty track: jump to that position, then keep
+                        // dragging so the user can fine-tune without releasing.
+                        summaryClickArmed = false
+                        pendingTabSelection = null
+                        pendingSectionToggle = null
+                        pendingOverrideClick = null
+                        contentScrollOffset = contentScrollbar.trackClickToScrollOffset(
+                            mouseY = mouseY,
+                            contentHeight = lastContentHeight,
+                            visibleHeight = viewportHeight
+                        )
+                        isScrollbarDragging = true
+                        scrollDragStartMouseY = mouseY
+                        scrollDragStartOffset = contentScrollOffset
+                    } else if (resizeZone != UIUtils.ResizeZone.NONE) {
                         summaryClickArmed = false
                         pendingTabSelection = null
                         pendingSectionToggle = null
@@ -540,6 +588,9 @@ object DamageCalcPanel {
                 }
             }
         } else {
+            if (isScrollbarDragging) {
+                isScrollbarDragging = false
+            }
             if (interaction.isDragging) {
                 summaryClickArmed = false
                 pendingTabSelection = null
