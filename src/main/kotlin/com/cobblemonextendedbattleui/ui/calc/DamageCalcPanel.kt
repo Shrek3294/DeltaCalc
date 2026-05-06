@@ -9,6 +9,7 @@ import com.cobblemonextendedbattleui.calc.CalcRenderModel
 import com.cobblemonextendedbattleui.calc.InferenceValueState
 import com.cobblemonextendedbattleui.calc.OverrideRow
 import com.cobblemonextendedbattleui.compat.delta.DeltaBattlePlatformAdapter
+import com.cobblemonextendedbattleui.ui.shared.ScrollbarRenderer
 import com.cobblemonextendedbattleui.ui.shared.WidgetInteractionHandler
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
@@ -66,6 +67,20 @@ object DamageCalcPanel {
     private val interaction = WidgetInteractionHandler(UIUtils.ActivePanel.DAMAGE_CALC).apply {
         dragThreshold = 4
     }
+
+    private val contentScrollbar = ScrollbarRenderer(
+        trackWidth = 3,
+        bgColor = UIUtils.color(40, 50, 65, 120),
+        thumbColor = UIUtils.color(140, 160, 180, 200),
+        thumbHoverColor = UIUtils.color(180, 200, 220, 220)
+    )
+
+    // Scroll state for the moves + team viewport. Cached content height /
+    // viewport bounds let the wheel handler clamp without re-rendering.
+    private var contentScrollOffset: Int = 0
+    private var lastContentHeight: Int = 0
+    private var lastContentViewportTop: Int = 0
+    private var lastContentViewportBottom: Int = 0
 
     private var wasMouseDown = false
     private var wasRightMouseDown = false
@@ -270,9 +285,28 @@ object DamageCalcPanel {
         context.fill(boxRight - 1, boxTop, boxRight, boxBot, boxColor)
         textY += s(6)
 
+        // ─── Scrollable content viewport (move predictions + team) ─────────
+        // Scissor clips rendering to the panel; matrix translate lets the
+        // existing inline `textY` accumulators stay unchanged. Click bounds
+        // captured inside the viewport subtract the scroll offset so they
+        // sit in screen coords and handleInput tests work bare.
+        val viewportTop = textY
+        val viewportBottom = (y + height - UIUtils.FRAME_INSET).coerceAtLeast(viewportTop + 16)
+        val viewportHeight = viewportBottom - viewportTop
+        val maxScroll = (lastContentHeight - viewportHeight).coerceAtLeast(0)
+        contentScrollOffset = contentScrollOffset.coerceIn(0, maxScroll)
+        val scrollOffset = contentScrollOffset
+        lastContentViewportTop = viewportTop
+        lastContentViewportBottom = viewportBottom
+
+        context.matrices.push()
+        context.matrices.translate(0f, -scrollOffset.toFloat(), 0f)
+        context.enableScissor(cellX, viewportTop, cellX + cellW, viewportBottom)
+        val contentStartY = textY
+
         val movesHeader = if (CalcPanelState.movesSectionCollapsed) "[+] MOVE PREDICTIONS" else "[-] MOVE PREDICTIONS"
         UIUtils.drawText(context, movesHeader, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_LABEL, textScale)
-        lastMovesHeaderBounds = intArrayOf(cellX, textY - 2, cellW, s(11).coerceAtLeast(8))
+        lastMovesHeaderBounds = intArrayOf(cellX, (textY - 2) - scrollOffset, cellW, s(11).coerceAtLeast(8))
         textY += s(10)
 
         if (!CalcPanelState.movesSectionCollapsed) {
@@ -307,15 +341,17 @@ object DamageCalcPanel {
         textY += s(3)
         val teamHeader = if (CalcPanelState.teamSectionCollapsed) "[+] TEAM" else "[-] TEAM"
         UIUtils.drawText(context, teamHeader, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_LABEL, textScale)
-        lastTeamHeaderBounds = intArrayOf(cellX, textY - 2, cellW, s(11).coerceAtLeast(8))
+        lastTeamHeaderBounds = intArrayOf(cellX, (textY - 2) - scrollOffset, cellW, s(11).coerceAtLeast(8))
         textY += s(10)
 
         if (!CalcPanelState.teamSectionCollapsed) {
-            lastPlayerTabBounds = drawTabs(context, cellX + 6, textY, tabAreaWidth, model.playerTabs, model.snapshot.playerTeam, textScale, uiScale)
+            val playerTabsRaw = drawTabs(context, cellX + 6, textY, tabAreaWidth, model.playerTabs, model.snapshot.playerTeam, textScale, uiScale)
+            lastPlayerTabBounds = playerTabsRaw.map { tab -> tab.copy(y = tab.y - scrollOffset) }
             textY += tabBlockHeight(model.playerTabs, tabAreaWidth, uiScale)
 
             if (model.opponentTabs.size > 1) {
-                lastOpponentTabBounds = drawTabs(context, cellX + 6, textY, tabAreaWidth, model.opponentTabs, model.snapshot.opponentTeam, textScale, uiScale)
+                val opponentTabsRaw = drawTabs(context, cellX + 6, textY, tabAreaWidth, model.opponentTabs, model.snapshot.opponentTeam, textScale, uiScale)
+                lastOpponentTabBounds = opponentTabsRaw.map { tab -> tab.copy(y = tab.y - scrollOffset) }
                 textY += tabBlockHeight(model.opponentTabs, tabAreaWidth, uiScale)
             } else {
                 lastOpponentTabBounds = emptyList()
@@ -324,6 +360,21 @@ object DamageCalcPanel {
             lastPlayerTabBounds = emptyList()
             lastOpponentTabBounds = emptyList()
         }
+
+        context.disableScissor()
+        context.matrices.pop()
+        lastContentHeight = textY - contentStartY
+
+        // Right-edge scrollbar; ScrollbarRenderer no-ops when content fits.
+        contentScrollbar.render(
+            context = context,
+            x = cellX + cellW - 4,
+            y = viewportTop,
+            height = viewportHeight,
+            contentHeight = lastContentHeight,
+            visibleHeight = viewportHeight,
+            scrollOffset = scrollOffset
+        )
 
         drawResizeHandle(context, x, y, width, height)
     }
@@ -337,11 +388,18 @@ object DamageCalcPanel {
         val handle = mc.window.handle
         val isCtrlDown = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS ||
             GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS
-        if (!isCtrlDown) {
-            return false
+        if (isCtrlDown) {
+            CalcPanelState.adjustFontScale(if (deltaY > 0) CalcPanelState.FONT_SCALE_STEP else -CalcPanelState.FONT_SCALE_STEP)
+            CalcPanelState.save()
+            return true
         }
-        CalcPanelState.adjustFontScale(if (deltaY > 0) CalcPanelState.FONT_SCALE_STEP else -CalcPanelState.FONT_SCALE_STEP)
-        CalcPanelState.save()
+
+        // No-Ctrl wheel scrolls the moves+team viewport when there's overflow.
+        val viewportHeight = (lastContentViewportBottom - lastContentViewportTop).coerceAtLeast(0)
+        val maxScroll = (lastContentHeight - viewportHeight).coerceAtLeast(0)
+        if (maxScroll <= 0) return false  // nothing to scroll, let other widgets handle
+        val step = (12 * deltaY).toInt()  // 12px per wheel tick; deltaY > 0 = scroll up
+        contentScrollOffset = (contentScrollOffset - step).coerceIn(0, maxScroll)
         return true
     }
 
