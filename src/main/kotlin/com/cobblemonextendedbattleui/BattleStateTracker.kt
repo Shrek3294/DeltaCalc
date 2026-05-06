@@ -274,6 +274,10 @@ object BattleStateTracker {
     fun swapSpecificStats(pokemon1Name: String, pokemon2Name: String, statsToSwap: List<BattleStat>, pokemon1IsAlly: Boolean? = null, pokemon2IsAlly: Boolean? = null) = StatTracker.swapSpecificStats(pokemon1Name, pokemon2Name, statsToSwap, pokemon1IsAlly, pokemon2IsAlly)
     fun stealPositiveStats(userPokemonName: String, targetPokemonName: String, userIsAlly: Boolean? = null, targetIsAlly: Boolean? = null) = StatTracker.stealPositiveStats(userPokemonName, targetPokemonName, userIsAlly, targetIsAlly)
     fun getStatChanges(uuid: UUID): Map<BattleStat, Int> = StatTracker.getStatChanges(uuid)
+    fun getStatChangesByName(pokemonName: String, preferAlly: Boolean? = null): Map<BattleStat, Int> {
+        val uuid = PokemonRegistry.resolvePokemonUuid(pokemonName, preferAlly) ?: return emptyMap()
+        return StatTracker.getStatChanges(uuid)
+    }
     fun getStatFromName(name: String): BattleStat? = StatTracker.getStatFromName(name)
 
     // ═══════════════════════════════════════════════════════════════════════════
