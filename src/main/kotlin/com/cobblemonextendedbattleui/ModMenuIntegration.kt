@@ -21,7 +21,10 @@ class ModMenuIntegration : ModMenuApi {
         val builder = ConfigBuilder.create()
             .setParentScreen(parent)
             .setTitle(Text.translatable("cobblemonextendedbattleui.config.title"))
-            .setSavingRunnable { PanelConfig.save() }
+            .setSavingRunnable {
+                PanelConfig.save()
+                CalcPanelState.save()
+            }
 
         val general = builder.getOrCreateCategory(Text.translatable("cobblemonextendedbattleui.config.category.features"))
         val entryBuilder = builder.entryBuilder()
@@ -72,6 +75,18 @@ class ModMenuIntegration : ModMenuApi {
                 .setMin(PanelConfig.MIN_FONT_SCALE)
                 .setMax(PanelConfig.MAX_FONT_SCALE)
                 .setSaveConsumer { value -> PanelConfig.setFontScale(value) }
+                .build()
+        )
+
+        // Damage Calc panel toggle
+        general.addEntry(
+            entryBuilder.startBooleanToggle(
+                Text.translatable("cobblemonextendedbattleui.config.enableDamageCalc"),
+                CalcPanelState.enabled
+            )
+                .setDefaultValue(true)
+                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.enableDamageCalc.tooltip"))
+                .setSaveConsumer { value -> CalcPanelState.setEnabled(value) }
                 .build()
         )
 

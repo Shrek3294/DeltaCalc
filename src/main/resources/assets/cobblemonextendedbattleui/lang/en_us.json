@@ -18,6 +18,8 @@
   "cobblemonextendedbattleui.config.enableBattleInfoPanel.tooltip": "Show panel with weather, terrain, field conditions, and stat stages",
   "cobblemonextendedbattleui.config.battleInfoFontScale": "Battle Info Text Scale",
   "cobblemonextendedbattleui.config.battleInfoFontScale.tooltip": "Scale the battle info panel text down on smaller screens, or up if you want a larger UI. Also affects the Ctrl+Scroll font adjustment.",
+  "cobblemonextendedbattleui.config.enableDamageCalc": "Damage Calc Panel",
+  "cobblemonextendedbattleui.config.enableDamageCalc.tooltip": "Show the in-battle damage calculator panel with opponent set inference and move predictions.",
   "cobblemonextendedbattleui.config.damageCalcFontScale": "Damage Calc Text Scale",
   "cobblemonextendedbattleui.config.damageCalcFontScale.tooltip": "Scale the damage calculator text down on smaller screens. Also affects the Ctrl+Scroll font adjustment for the calc panel.",
 

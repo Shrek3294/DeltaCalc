@@ -14,10 +14,10 @@ object CalcPanelState {
         FabricLoader.getInstance().configDir.resolve("deltacalc-calc-panel.json").toFile()
     }
 
-    // Default off so a fresh install doesn't drop a calc panel on top of a
-    // brand-new user's screen — they opt in via mod menu / hotkey. Existing
-    // users keep their saved state via load().
-    var enabled: Boolean = false
+    // Default ON so the headline feature is discoverable. The Mod Menu
+    // exposes a toggle for users who want to hide it. Existing users keep
+    // their saved state via load() either way.
+    var enabled: Boolean = true
         private set
     var x: Int? = null
         private set
@@ -39,7 +39,7 @@ object CalcPanelState {
         private set
 
     data class ConfigData(
-        val enabled: Boolean = false,
+        val enabled: Boolean = true,
         val x: Int? = null,
         val y: Int? = null,
         val width: Int? = null,
@@ -122,5 +122,9 @@ object CalcPanelState {
 
     fun setFontScale(value: Float) {
         fontScale = value.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+    }
+
+    fun setEnabled(value: Boolean) {
+        enabled = value
     }
 }
