@@ -74,7 +74,13 @@ object CalcBattleSnapshotFactory {
                 spd = it.specialDefence,
                 spe = it.speed
             )
-        }
+        } ?: baseStats?.let { derivedHeuristicStats(it, level) }
+        // ^ Fallback for cases where the battle Pokemon isn't in the player's
+        // party storage — e.g. custom-rule battles that clone the team at
+        // a forced level (lvl 50 cap, random battle, etc.). Without this we
+        // emit "Need actual stats" and the move table reads as broken.
+        // Approximate stats are better than nothing; a revealed item/ability
+        // or manual override will tighten the calc as the battle progresses.
         val runtimeTypes = resolveRuntimeOverrideTypes(uuid)
         val dbTypes = speciesEntry?.typeNames.orEmpty()
         val liveFormTypes = formTypeNames.ifEmpty {
@@ -339,5 +345,59 @@ object CalcBattleSnapshotFactory {
             spd = spd,
             spe = spe
         )
+    }
+
+    /**
+     * Heuristic stat block for the player side when partyPokemon is null
+     * (custom-rule clone battles, lvl 50 cap, random battle, etc.). Picks
+     * the same offensive/defensive spread shape that build_default_delta_sets.py
+     * uses on the data-pipeline side, then runs Cobblemon's standard
+     * level/IV/EV/nature math to produce final stats. Approximate but
+     * within damage-roll variance, and revealed info tightens it from there.
+     */
+    private fun derivedHeuristicStats(base: CalcStats, level: Int): CalcStats {
+        val isPhysical = base.atk >= base.spa
+        val offensiveScore = maxOf(base.atk, base.spa) + base.spe
+        val defensiveScore = base.hp + maxOf(base.def, base.spd)
+
+        val (nature, evs) = if (offensiveScore >= defensiveScore) {
+            val natureName = if (isPhysical) "Adamant" else "Modest"
+            val evBlock = if (isPhysical) {
+                CalcStats(hp = 4, atk = 252, def = 0, spa = 0, spd = 0, spe = 252)
+            } else {
+                CalcStats(hp = 4, atk = 0, def = 0, spa = 252, spd = 0, spe = 252)
+            }
+            natureName to evBlock
+        } else {
+            val bestDefPhysical = base.def >= base.spd
+            val natureName = if (bestDefPhysical) "Bold" else "Calm"
+            val evBlock = if (bestDefPhysical) {
+                CalcStats(hp = 252, atk = 0, def = 252, spa = 0, spd = 0, spe = 4)
+            } else {
+                CalcStats(hp = 252, atk = 0, def = 0, spa = 0, spd = 252, spe = 4)
+            }
+            natureName to evBlock
+        }
+
+        val mods = heuristicNatureMods(nature)
+        val hp = (((2 * base.hp + 31 + evs.hp / 4) * level) / 100) + level + 10
+        return CalcStats(
+            hp = hp,
+            atk = StatCalculator.calculateStat(base.atk, level, 31, evs.atk, mods["atk"] ?: 1.0),
+            def = StatCalculator.calculateStat(base.def, level, 31, evs.def, mods["def"] ?: 1.0),
+            spa = StatCalculator.calculateStat(base.spa, level, 31, evs.spa, mods["spa"] ?: 1.0),
+            spd = StatCalculator.calculateStat(base.spd, level, 31, evs.spd, mods["spd"] ?: 1.0),
+            spe = StatCalculator.calculateStat(base.spe, level, 31, evs.spe, mods["spe"] ?: 1.0)
+        )
+    }
+
+    private fun heuristicNatureMods(nature: String): Map<String, Double> {
+        return when (nature) {
+            "Adamant" -> mapOf("atk" to 1.1, "spa" to 0.9)
+            "Modest"  -> mapOf("spa" to 1.1, "atk" to 0.9)
+            "Bold"    -> mapOf("def" to 1.1, "atk" to 0.9)
+            "Calm"    -> mapOf("spd" to 1.1, "atk" to 0.9)
+            else      -> emptyMap()
+        }
     }
 }
