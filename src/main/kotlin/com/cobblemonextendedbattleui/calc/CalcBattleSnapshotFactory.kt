@@ -65,22 +65,31 @@ object CalcBattleSnapshotFactory {
         val baseStats = formBaseStats?.toCalcStats()
             ?: resolveBaseStats(battlePokemon, partyPokemon, speciesId, formName)
             ?: speciesEntry?.baseStats?.toCalcStats()
-        val actualStats = partyPokemon?.let {
+        // After a mega evolved Pokemon switches out and back in, Cobblemon has a
+        // known visual glitch where the species briefly reports base-form stats
+        // even though it is still mega. In that state `partyPokemon.attack` etc.
+        // reflect the base form, which would silently downgrade the calc. When
+        // FormTracker says this UUID is mega (which we now preserve across
+        // switches), re-derive actualStats from the mega baseStats so the damage
+        // engine doesn't lose the mega's stat boosts.
+        val isMegaTracked = FormTracker.getCurrentForm(uuid)?.isMega == true
+        val actualStats = if (partyPokemon != null && !isMegaTracked) {
             CalcStats(
-                hp = it.maxHealth,
-                atk = it.attack,
-                def = it.defence,
-                spa = it.specialAttack,
-                spd = it.specialDefence,
-                spe = it.speed
+                hp = partyPokemon.maxHealth,
+                atk = partyPokemon.attack,
+                def = partyPokemon.defence,
+                spa = partyPokemon.specialAttack,
+                spd = partyPokemon.specialDefence,
+                spe = partyPokemon.speed
             )
-        } ?: baseStats?.let { derivedHeuristicStats(it, level) }
-        // ^ Fallback for cases where the battle Pokemon isn't in the player's
-        // party storage — e.g. custom-rule battles that clone the team at
-        // a forced level (lvl 50 cap, random battle, etc.). Without this we
-        // emit "Need actual stats" and the move table reads as broken.
-        // Approximate stats are better than nothing; a revealed item/ability
-        // or manual override will tighten the calc as the battle progresses.
+        } else {
+            // Fallback for cases where the battle Pokemon isn't in the player's
+            // party storage — e.g. custom-rule battles that clone the team at
+            // a forced level (lvl 50 cap, random battle, etc.) — and the mega
+            // re-derive path above. Approximate stats are better than nothing;
+            // a revealed item/ability or manual override will tighten the calc.
+            baseStats?.let { derivedHeuristicStats(it, level) }
+        }
         val runtimeTypes = resolveRuntimeOverrideTypes(uuid)
         val dbTypes = speciesEntry?.typeNames.orEmpty()
         val liveFormTypes = formTypeNames.ifEmpty {

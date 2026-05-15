@@ -171,15 +171,26 @@ object BestEffortDamageEngine : DamageEngine {
 
         val playerFainted = snapshot.playerTeam.count { it.uuid != snapshot.playerActiveUuid && it.currentHp <= 0 }
         val opponentFainted = snapshot.opponentTeam.count { it.uuid != snapshot.opponentActiveUuid && it.currentHp <= 0 }
+        // Strong Winds is active when either side's active Pokemon has Delta Stream
+        // (canon) or Parasol Prayer (Delta's Tinkaton-Gamma signature). Effect persists
+        // as long as such a Pokemon is on the field, regardless of which side attacks.
+        val strongWinds = isStrongWindsHolder(snapshot.playerActive?.abilityName) ||
+            isStrongWindsHolder(snapshot.opponentActive?.abilityName) ||
+            // Also honor the effective opponent set's ability (inferred / overridden mega
+            // intrinsic) so we still credit Strong Winds when the raw snapshot ability
+            // hasn't been revealed yet.
+            isStrongWindsHolder(inferredSet.ability.first.takeIf { snapshot.opponentActive?.abilityName == null })
         val playerContext = DamageContext(
             snapshot.weather, snapshot.terrain,
             snapshot.playerSide, snapshot.opponentSide,
-            attackerTeamFainted = playerFainted
+            attackerTeamFainted = playerFainted,
+            strongWindsActive = strongWinds
         )
         val opponentContext = DamageContext(
             snapshot.weather, snapshot.terrain,
             snapshot.opponentSide, snapshot.playerSide,
-            attackerTeamFainted = opponentFainted
+            attackerTeamFainted = opponentFainted,
+            strongWindsActive = strongWinds
         )
 
         val yourMoves = playerSnapshot.moveList.take(4).map { moveRef ->
@@ -377,11 +388,25 @@ object BestEffortDamageEngine : DamageEngine {
 
         val bypassAbility = bypassesDefenderAbility(attacker.abilityName) || moveBypassesDefenderAbility(template)
         val moveNameNormalized = normalizeToken(template.name)
+        val strongWindsClampsThisHit = context.strongWindsActive && defender.snapshot.hasType("flying")
         var effectiveness = defender.snapshot.typeNames
             .mapNotNull { ElementalTypes.get(it.lowercase()) }
             .fold(1.0) { acc, defendingType ->
-                acc * moveTypeChartMultiplier(moveNameNormalized, moveType, defendingType)
+                var slice = moveTypeChartMultiplier(moveNameNormalized, moveType, defendingType)
+                // Strong Winds (Delta Stream / Parasol Prayer): any per-type multiplier
+                // greater than 1.0 against a Flying-type defender is clamped to neutral.
+                // Applied per-type because dual-type Flying defenders still take 1× from
+                // their non-Flying defending type (e.g. Ice on a Rock/Flying defender:
+                // Rock 2× × Flying-clamped-1× = 2× total, then resists / immunities
+                // from the non-Flying type still apply normally).
+                if (strongWindsClampsThisHit && defendingType.name.equals("flying", ignoreCase = true) && slice > 1.0) {
+                    slice = 1.0
+                }
+                acc * slice
             }
+        if (strongWindsClampsThisHit) {
+            warnings += "Strong Winds (Flying SE -> neutral)"
+        }
 
         if (!bypassAbility) {
             effectiveness *= abilityTypeModifier(defender.abilityName, moveTypeName)
@@ -423,7 +448,7 @@ object BestEffortDamageEngine : DamageEngine {
         modifier *= weatherModifier(moveTypeName, context)
         modifier *= terrainModifier(moveTypeName, template, attacker, defender, context)
         modifier *= screenFactor
-        modifier *= burnModifier(attacker, category)
+        modifier *= burnModifier(attacker, template, category)
         modifier *= offensiveAbilityModifier(attacker, template, moveTypeName, category, context, effectiveness)
         modifier *= defensiveAbilityFactor
         modifier *= deltaOffensiveAbilityModifier(attacker, moveTypeName, template, effectiveness)
@@ -671,6 +696,13 @@ object BestEffortDamageEngine : DamageEngine {
     ): Double {
         val moveName = normalizeToken(template.name)
         return when (moveName) {
+            // Friendship-scaled moves. Cobblemon may report a default / unscaled BP via
+            // `template.power` that's well below canonical max; the calc has no way to
+            // read the holder's actual friendship value, so assume max friendship for
+            // Return (102 BP) and minimum friendship for Frustration (102 BP). Most
+            // competitive sets do this anyway — "best-case" matches user expectation.
+            "return" -> 102.0
+            "frustration" -> 102.0
             "hex", "barbbarrage", "infernalparade" -> if (defender.snapshot.status != null) template.power * 2.0 else template.power
             "venoshock" -> if (normalizeToken(defender.snapshot.status) in setOf("poison", "poisonbadly", "badpoison")) template.power * 2.0 else template.power
             "weatherball" -> {
@@ -970,9 +1002,20 @@ object BestEffortDamageEngine : DamageEngine {
         return 1.0
     }
 
-    private fun burnModifier(attacker: DamageCombatant, category: com.cobblemon.mod.common.api.moves.categories.DamageCategory): Double {
+    private fun burnModifier(
+        attacker: DamageCombatant,
+        template: MoveTemplate,
+        category: com.cobblemon.mod.common.api.moves.categories.DamageCategory
+    ): Double {
         if (category != DamageCategories.PHYSICAL) return 1.0
         if (normalizeToken(attacker.snapshot.status) != "burn") return 1.0
+        // Burn's physical Atk penalty is bypassed by:
+        //   - Guts (ability) — already handled here
+        //   - Facade (move) — canon special case: Facade ignores burn's Atk drop entirely
+        //     in addition to doubling its base power, so a burned Facade hits at full
+        //     2× power with no 0.5× burn cut. Without this exemption the calc was net
+        //     1.0× (= 2.0 × 0.5), i.e. equivalent to normal Facade.
+        if (normalizeToken(template.name) == "facade") return 1.0
         return if (normalizeToken(attacker.abilityName) == "guts") 1.0 else 0.5
     }
 
@@ -989,7 +1032,7 @@ object BestEffortDamageEngine : DamageEngine {
         val power = template.power.toInt()
         return when (ability) {
             "hugepower", "purepower" -> if (category == DamageCategories.PHYSICAL) 2.0 else 1.0
-            "guts" -> if (category == DamageCategories.PHYSICAL && attacker.snapshot.status != null) 1.5 else 1.0
+            "guts" -> if (category == DamageCategories.PHYSICAL && isStatused(attacker.snapshot.status)) 1.5 else 1.0
             "solarpower" -> if (category == DamageCategories.SPECIAL && normalizeToken(context.weather) in setOf("harshsunlight", "sun", "sunlight")) 1.5 else 1.0
             "flareboost" -> if (category == DamageCategories.SPECIAL && normalizeToken(attacker.snapshot.status) == "burn") 1.5 else 1.0
             "toxicboost" -> if (category == DamageCategories.PHYSICAL && normalizeToken(attacker.snapshot.status) in setOf("poison", "poisonbadly", "badpoison")) 1.5 else 1.0
@@ -1195,6 +1238,30 @@ object BestEffortDamageEngine : DamageEngine {
         val attackerSide: CalcSideState,
         val defenderSide: CalcSideState,
         /** Number of attacker's non-active teammates currently at 0 HP. Used by Supreme Overlord. */
-        val attackerTeamFainted: Int = 0
+        val attackerTeamFainted: Int = 0,
+        /**
+         * True when Delta Stream or Parasol Prayer is active on the field (either side).
+         * Reduces SE-against-Flying multipliers to neutral on Flying-type defenders.
+         */
+        val strongWindsActive: Boolean = false
     )
+
+    private fun isStrongWindsHolder(abilityName: String?): Boolean {
+        return normalizeToken(abilityName) in setOf("deltastream", "parasolprayer")
+    }
+
+    /**
+     * True when the status string identifies a real non-volatile status condition.
+     * Guards against empty strings or unrecognized values that would otherwise trip
+     * `status != null` checks. Used by Guts (and similar status-gated abilities).
+     */
+    private fun isStatused(status: String?): Boolean {
+        return normalizeToken(status) in setOf(
+            "burn", "brn",
+            "poison", "psn", "poisonbadly", "badpoison", "toxic", "tox",
+            "paralysis", "paralyze", "paralyzed", "par",
+            "sleep", "asleep", "slp",
+            "frozen", "freeze", "frz"
+        )
+    }
 }

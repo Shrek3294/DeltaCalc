@@ -163,38 +163,51 @@ class BattleDatabase private constructor(
         }
 
         private fun fromDataset(dataset: BattleDatabaseDataset): BattleDatabase {
+            // Two-pass indexing: primary identifiers first, aliases via putIfAbsent.
+            // The generated dataset includes the *base* species name in every variant's
+            // aliases (e.g. ursaluna-bloodmoon's aliases list "Ursaluna"; zapdos-galar's
+            // list "Zapdos"). Single-pass `put` lets the last-indexed variant overwrite
+            // the base species' key, which is why the calc kept showing Ursaluna as
+            // Ursaluna-Bloodmoon and Zapdos as Zapdos-Galar.
+            //
+            // Primary identifiers (speciesKey/speciesId/slug/displayName) get precedence;
+            // aliases only fill gaps they don't already cover. This is a stable fix
+            // regardless of dataset ordering.
             val speciesByKey = buildMap {
-                dataset.species.forEach { entry ->
-                    indexSpeciesEntry(entry)
-                }
+                dataset.species.forEach { entry -> indexSpeciesPrimary(entry) }
+                dataset.species.forEach { entry -> indexSpeciesAliases(entry) }
             }
             val deltaUsageByKey = buildMap {
-                dataset.deltaRanked.forEach { entry ->
-                    indexSetEntry(entry)
-                }
+                dataset.deltaRanked.forEach { entry -> indexSetPrimary(entry) }
+                dataset.deltaRanked.forEach { entry -> indexSetAliases(entry) }
             }
             val smogonUsageByKey = buildMap {
-                dataset.smogonFallback.forEach { entry ->
-                    indexSetEntry(entry)
-                }
+                dataset.smogonFallback.forEach { entry -> indexSetPrimary(entry) }
+                dataset.smogonFallback.forEach { entry -> indexSetAliases(entry) }
             }
             return BattleDatabase(speciesByKey, deltaUsageByKey, smogonUsageByKey)
         }
 
-        private fun MutableMap<String, BattleSpeciesEntry>.indexSpeciesEntry(entry: BattleSpeciesEntry) {
-            normalizedCandidates(entry.speciesKey).forEach { put(it, entry) }
-            entry.speciesId?.let(::normalizedCandidates)?.forEach { put(it, entry) }
-            entry.slug?.let(::normalizedCandidates)?.forEach { put(it, entry) }
-            normalizedCandidates(entry.displayName).forEach { put(it, entry) }
-            entry.aliases.flatMap(::normalizedCandidates).forEach { put(it, entry) }
+        private fun MutableMap<String, BattleSpeciesEntry>.indexSpeciesPrimary(entry: BattleSpeciesEntry) {
+            normalizedCandidates(entry.speciesKey).forEach { putIfAbsent(it, entry) }
+            entry.speciesId?.let(::normalizedCandidates)?.forEach { putIfAbsent(it, entry) }
+            entry.slug?.let(::normalizedCandidates)?.forEach { putIfAbsent(it, entry) }
+            normalizedCandidates(entry.displayName).forEach { putIfAbsent(it, entry) }
         }
 
-        private fun MutableMap<String, BattleSetEntry>.indexSetEntry(entry: BattleSetEntry) {
-            normalizedCandidates(entry.speciesKey).forEach { put(it, entry) }
-            entry.speciesId?.let(::normalizedCandidates)?.forEach { put(it, entry) }
-            entry.slug?.let(::normalizedCandidates)?.forEach { put(it, entry) }
-            normalizedCandidates(entry.displayName).forEach { put(it, entry) }
-            entry.aliases.flatMap(::normalizedCandidates).forEach { put(it, entry) }
+        private fun MutableMap<String, BattleSpeciesEntry>.indexSpeciesAliases(entry: BattleSpeciesEntry) {
+            entry.aliases.flatMap(::normalizedCandidates).forEach { putIfAbsent(it, entry) }
+        }
+
+        private fun MutableMap<String, BattleSetEntry>.indexSetPrimary(entry: BattleSetEntry) {
+            normalizedCandidates(entry.speciesKey).forEach { putIfAbsent(it, entry) }
+            entry.speciesId?.let(::normalizedCandidates)?.forEach { putIfAbsent(it, entry) }
+            entry.slug?.let(::normalizedCandidates)?.forEach { putIfAbsent(it, entry) }
+            normalizedCandidates(entry.displayName).forEach { putIfAbsent(it, entry) }
+        }
+
+        private fun MutableMap<String, BattleSetEntry>.indexSetAliases(entry: BattleSetEntry) {
+            entry.aliases.flatMap(::normalizedCandidates).forEach { putIfAbsent(it, entry) }
         }
 
         private fun normalizedCandidates(raw: String): List<String> {

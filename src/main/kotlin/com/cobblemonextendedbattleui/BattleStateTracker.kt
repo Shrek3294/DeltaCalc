@@ -354,7 +354,7 @@ object BattleStateTracker {
     fun getSpeciesIdByName(pokemonName: String, preferAlly: Boolean? = null): Identifier? = FormTracker.getSpeciesIdByName(pokemonName, preferAlly)
 
     fun setCurrentForm(pokemonName: String, formName: String, isMega: Boolean = false, isTemporary: Boolean = false, preferAlly: Boolean? = null) = FormTracker.setCurrentForm(pokemonName, formName, isMega, isTemporary, preferAlly)
-    fun clearCurrentForm(pokemonName: String, preferAlly: Boolean? = null) = FormTracker.clearCurrentForm(pokemonName, preferAlly)
+    fun clearCurrentForm(pokemonName: String, preferAlly: Boolean? = null, keepPermanent: Boolean = false) = FormTracker.clearCurrentForm(pokemonName, preferAlly, keepPermanent)
     fun getCurrentForm(uuid: UUID): FormState? = FormTracker.getCurrentForm(uuid)
     fun getCurrentFormByName(pokemonName: String, preferAlly: Boolean? = null): FormState? = FormTracker.getCurrentFormByName(pokemonName, preferAlly)
 

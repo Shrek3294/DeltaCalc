@@ -315,7 +315,10 @@ object StateUpdater {
         BattleStateTracker.clearTransformStatusByName(pokemonName)
         TeamIndicatorUI.clearTransformStatus(pokemonName)
         BattleStateTracker.restoreOriginalTypes(pokemonName)
-        BattleStateTracker.clearCurrentForm(pokemonName)
+        // Switch/drag must not clear mega forms: mega evolution is permanent for the
+        // battle, and Cobblemon's visual sometimes shows the base sprite on switch-in.
+        // keepPermanent=true preserves the mega entry so calc keeps using mega stats.
+        BattleStateTracker.clearCurrentForm(pokemonName, keepPermanent = true)
     }
 
     fun markPokemonTransformed(args: Array<out Any>) {

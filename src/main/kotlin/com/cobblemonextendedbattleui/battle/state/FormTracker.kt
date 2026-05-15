@@ -58,8 +58,21 @@ object FormTracker {
         )
     }
 
-    fun clearCurrentForm(pokemonName: String, preferAlly: Boolean? = null) {
+    fun clearCurrentForm(pokemonName: String, preferAlly: Boolean? = null, keepPermanent: Boolean = false) {
         val uuid = PokemonRegistry.resolvePokemonUuid(pokemonName, preferAlly) ?: return
+        val existing = pokemonForms[uuid] ?: return
+        // Mega evolution is permanent for the duration of the battle — it does NOT
+        // revert on switch-out. Cobblemon has a known visual glitch where a mega
+        // shows its base form sprite after a switch-in even though the species
+        // is still mega; if we cleared the tracker on switch the calc would drop
+        // the mega stats too. `keepPermanent=true` (used by switch/drag cleanup)
+        // preserves mega entries; explicit form-ended events still clear normally.
+        if (keepPermanent && existing.isMega) {
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "FormTracker: preserving mega form '${existing.currentForm}' for $pokemonName across switch"
+            )
+            return
+        }
         if (pokemonForms.remove(uuid) != null) {
             CobblemonExtendedBattleUI.LOGGER.debug("FormTracker: $pokemonName reverted to base form")
         }
