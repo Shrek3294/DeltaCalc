@@ -583,10 +583,8 @@ object BestEffortDamageEngine : DamageEngine {
         "photongeyser",
         "lightthatburnsthesky",
         "sunsteelstrike",
-        "moongeistbeam",
-        "gmaxdrumsolo",
-        "gmaxfireball",
-        "gmaxhydrosnipe"
+        "moongeistbeam"
+        // Gigantamax signature moves removed: Gigantamax is not in the Delta pack.
     )
 
     private fun natureModifiers(nature: String): Map<String, Double> {

@@ -446,10 +446,8 @@ object BattleMessageInterceptor {
                 BattleStateTracker.setCurrentForm(pokemonName, "Dynamax", isMega = false, isTemporary = true)
             }
 
-            if (key == TranslationKeys.GIGANTAMAX_KEY && args.isNotEmpty()) {
-                val pokemonName = MessageParser.argToString(args[0])
-                BattleStateTracker.setCurrentForm(pokemonName, "Gigantamax", isMega = false, isTemporary = true)
-            }
+            // Gigantamax handler removed: Gigantamax is not in the Delta pack, so the
+            // message key never fires and the form swap had no source data to back it.
 
             // ═══════════════════════════════════════════════════════════════════
             // Type Modification Moves

@@ -340,7 +340,7 @@ object TranslationKeys {
     )
 
     const val DYNAMAX_KEY = "cobblemon.battle.start.dynamax"
-    const val GIGANTAMAX_KEY = "cobblemon.battle.start.gmax"
+    // GIGANTAMAX_KEY removed: Gigantamax mechanic is not present in the Delta pack.
 
     // ═════════════════════════════════════════════════════════════════════════
     // Type Modification Move Keys
