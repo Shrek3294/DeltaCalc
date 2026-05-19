@@ -58,6 +58,82 @@
       "abilities": [
         {"id": "levitate", "displayName": "Levitate", "type": "ability", "usagePercent": 100.0}
       ]
+    },
+    {
+      "speciesKey": "hydrapple-ultra",
+      "displayName": "Hydrapple-Ultra",
+      "speciesId": "hydrapple-ultra",
+      "slug": "hydrapple-ultra",
+      "source": "delta-curated",
+      "aliases": ["Hydrapple-Ultra", "hydrapple-ultra", "hydrappleultra", "Hydrapple Ultra", "hydrapple ultra", "Ultra Hydrapple"],
+      "spreads": [
+        {
+          "nature": "Modest",
+          "evs": {"hp": 244, "atk": 0, "def": 0, "spa": 252, "spd": 0, "spe": 12},
+          "usagePercent": 80.0
+        },
+        {
+          "nature": "Modest",
+          "evs": {"hp": 252, "atk": 0, "def": 0, "spa": 252, "spd": 0, "spe": 4},
+          "usagePercent": 20.0
+        }
+      ],
+      "moves": [
+        {"id": "fickle-beam", "displayName": "Fickle Beam", "type": null, "usagePercent": 85.0},
+        {"id": "sludge-bomb", "displayName": "Sludge Bomb", "type": null, "usagePercent": 95.0},
+        {"id": "earth-power", "displayName": "Earth Power", "type": null, "usagePercent": 80.0},
+        {"id": "giga-drain", "displayName": "Giga Drain", "type": null, "usagePercent": 65.0},
+        {"id": "nasty-plot", "displayName": "Nasty Plot", "type": null, "usagePercent": 25.0},
+        {"id": "recover", "displayName": "Recover", "type": null, "usagePercent": 20.0}
+      ],
+      "items": [
+        {"id": "assault-vest", "displayName": "Assault Vest", "type": "item", "usagePercent": 75.0},
+        {"id": "leftovers", "displayName": "Leftovers", "type": "item", "usagePercent": 20.0},
+        {"id": "life-orb", "displayName": "Life Orb", "type": "item", "usagePercent": 5.0}
+      ],
+      "abilities": [
+        {"id": "regenerator", "displayName": "Regenerator", "type": "ability", "usagePercent": 80.0},
+        {"id": "spoiledgoods", "displayName": "Spoiled Goods", "type": "ability", "usagePercent": 20.0}
+      ]
+    },
+    {
+      "speciesKey": "sevygarde",
+      "displayName": "Sevygarde",
+      "speciesId": "sevygarde",
+      "slug": "sevygarde",
+      "source": "delta-curated",
+      "aliases": ["Sevygarde", "sevygarde", "Sevigarde", "sevigarde", "Zyviper", "zyviper"],
+      "spreads": [
+        {
+          "nature": "Careful",
+          "evs": {"hp": 248, "atk": 0, "def": 0, "spa": 0, "spd": 252, "spe": 8},
+          "usagePercent": 60.0
+        },
+        {
+          "nature": "Adamant",
+          "evs": {"hp": 0, "atk": 252, "def": 0, "spa": 0, "spd": 4, "spe": 252},
+          "usagePercent": 40.0
+        }
+      ],
+      "moves": [
+        {"id": "thousand-arrows", "displayName": "Thousand Arrows", "type": null, "usagePercent": 95.0},
+        {"id": "toxic", "displayName": "Toxic", "type": null, "usagePercent": 60.0},
+        {"id": "haze", "displayName": "Haze", "type": null, "usagePercent": 50.0},
+        {"id": "rest", "displayName": "Rest", "type": null, "usagePercent": 50.0},
+        {"id": "extreme-speed", "displayName": "Extreme Speed", "type": null, "usagePercent": 45.0},
+        {"id": "poison-fang", "displayName": "Poison Fang", "type": null, "usagePercent": 40.0},
+        {"id": "poison-jab", "displayName": "Poison Jab", "type": null, "usagePercent": 35.0},
+        {"id": "encore", "displayName": "Encore", "type": null, "usagePercent": 20.0},
+        {"id": "scale-shot", "displayName": "Scale Shot", "type": null, "usagePercent": 15.0}
+      ],
+      "items": [
+        {"id": "leftovers", "displayName": "Leftovers", "type": "item", "usagePercent": 55.0},
+        {"id": "choice-band", "displayName": "Choice Band", "type": "item", "usagePercent": 30.0},
+        {"id": "heavy-duty-boots", "displayName": "Heavy-Duty Boots", "type": "item", "usagePercent": 15.0}
+      ],
+      "abilities": [
+        {"id": "shedskin", "displayName": "Shed Skin", "type": "ability", "usagePercent": 100.0}
+      ]
     }
   ]
 }

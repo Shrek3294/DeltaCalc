@@ -1043,6 +1043,29 @@
       "weightKg": 0
     },
     {
+      "speciesKey": "appletun-ultra",
+      "speciesId": "appletun-ultra",
+      "displayName": "Appletun-Ultra",
+      "slug": "appletun-ultra",
+      "formName": null,
+      "aliases": [
+        "appletun-ultra"
+      ],
+      "typeNames": [
+        "Poison",
+        "Dragon"
+      ],
+      "baseStats": {
+        "hp": 100,
+        "atk": 75,
+        "def": 95,
+        "spa": 95,
+        "spd": 90,
+        "spe": 30
+      },
+      "weightKg": 13
+    },
+    {
       "speciesKey": "applin",
       "speciesId": "applin",
       "displayName": "Applin",
@@ -1054,6 +1077,29 @@
       ],
       "typeNames": [
         "Grass",
+        "Dragon"
+      ],
+      "baseStats": {
+        "hp": 40,
+        "atk": 40,
+        "def": 80,
+        "spa": 40,
+        "spd": 40,
+        "spe": 20
+      },
+      "weightKg": 0.5
+    },
+    {
+      "speciesKey": "applin-ultra",
+      "speciesId": "applin-ultra",
+      "displayName": "Applin-Ultra",
+      "slug": "applin-ultra",
+      "formName": null,
+      "aliases": [
+        "applin-ultra"
+      ],
+      "typeNames": [
+        "Poison",
         "Dragon"
       ],
       "baseStats": {
@@ -8703,6 +8749,29 @@
       "weightKg": 4.4
     },
     {
+      "speciesKey": "dipplin-ultra",
+      "speciesId": "dipplin-ultra",
+      "displayName": "Dipplin-Ultra",
+      "slug": "dipplin-ultra",
+      "formName": null,
+      "aliases": [
+        "dipplin-ultra"
+      ],
+      "typeNames": [
+        "Poison",
+        "Dragon"
+      ],
+      "baseStats": {
+        "hp": 70,
+        "atk": 70,
+        "def": 120,
+        "spa": 95,
+        "spd": 90,
+        "spe": 40
+      },
+      "weightKg": 4.4
+    },
+    {
       "speciesKey": "ditto",
       "speciesId": "ditto",
       "displayName": "Ditto",
@@ -11736,6 +11805,29 @@
         "spe": 70
       },
       "weightKg": 0
+    },
+    {
+      "speciesKey": "flapple-ultra",
+      "speciesId": "flapple-ultra",
+      "displayName": "Flapple-Ultra",
+      "slug": "flapple-ultra",
+      "formName": null,
+      "aliases": [
+        "flapple-ultra"
+      ],
+      "typeNames": [
+        "Poison",
+        "Dragon"
+      ],
+      "baseStats": {
+        "hp": 60,
+        "atk": 105,
+        "def": 90,
+        "spa": 90,
+        "spd": 70,
+        "spe": 70
+      },
+      "weightKg": 1
     },
     {
       "speciesKey": "flarelm",
@@ -17353,6 +17445,29 @@
         "atk": 80,
         "def": 110,
         "spa": 120,
+        "spd": 80,
+        "spe": 44
+      },
+      "weightKg": 93
+    },
+    {
+      "speciesKey": "hydrapple-ultra",
+      "speciesId": "hydrapple-ultra",
+      "displayName": "Hydrapple-Ultra",
+      "slug": "hydrapple-ultra",
+      "formName": null,
+      "aliases": [
+        "hydrapple-ultra"
+      ],
+      "typeNames": [
+        "Poison",
+        "Dragon"
+      ],
+      "baseStats": {
+        "hp": 96,
+        "atk": 70,
+        "def": 120,
+        "spa": 130,
         "spd": 80,
         "spe": 44
       },
@@ -33280,6 +33395,29 @@
       "weightKg": 52.5
     },
     {
+      "speciesKey": "sevygarde",
+      "speciesId": "sevygarde",
+      "displayName": "Sevygarde",
+      "slug": "sevygarde",
+      "formName": null,
+      "aliases": [
+        "sevygarde"
+      ],
+      "typeNames": [
+        "Poison",
+        "Ground"
+      ],
+      "baseStats": {
+        "hp": 120,
+        "atk": 112,
+        "def": 100,
+        "spa": 100,
+        "spd": 80,
+        "spe": 88
+      },
+      "weightKg": 340
+    },
+    {
       "speciesKey": "sewaddle",
       "speciesId": "sewaddle",
       "displayName": "Sewaddle",
@@ -39902,6 +40040,29 @@
         "spe": 10
       },
       "weightKg": 15
+    },
+    {
+      "speciesKey": "trapinch-atom",
+      "speciesId": "trapinch-atom",
+      "displayName": "Trapinch-ATOM",
+      "slug": "trapinch-atom",
+      "formName": null,
+      "aliases": [
+        "trapinch-atom"
+      ],
+      "typeNames": [
+        "Water",
+        "Bug"
+      ],
+      "baseStats": {
+        "hp": 66,
+        "atk": 153,
+        "def": 78,
+        "spa": 45,
+        "spd": 120,
+        "spe": 66
+      },
+      "weightKg": 8
     },
     {
       "speciesKey": "trapinch-delta",
@@ -47229,6 +47390,144 @@
             "spa": 0,
             "spd": 0,
             "spe": 252
+          },
+          "usagePercent": 100.0
+        }
+      ]
+    },
+    {
+      "speciesKey": "appletun-ultra",
+      "displayName": "Appletun-Ultra",
+      "speciesId": "appletun-ultra",
+      "source": "delta-auto",
+      "aliases": [
+        "Appletun-Ultra",
+        "appletun-ultra",
+        "appletunultra",
+        "Appletun Ultra",
+        "appletun ultra"
+      ],
+      "abilities": [
+        {
+          "id": "thick-fat",
+          "displayName": "Thick Fat",
+          "type": "ability",
+          "usagePercent": 100.0
+        }
+      ],
+      "items": [
+        {
+          "id": "leftovers",
+          "displayName": "Leftovers",
+          "type": "item",
+          "usagePercent": 100.0
+        }
+      ],
+      "moves": [
+        {
+          "id": "dracometeor",
+          "displayName": "Draco Meteor",
+          "type": "dragon",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "sludgebomb",
+          "displayName": "Sludge Bomb",
+          "type": "poison",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "terablast",
+          "displayName": "Tera Blast",
+          "type": "normal",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "recover",
+          "displayName": "Recover",
+          "type": "normal",
+          "usagePercent": 100.0
+        }
+      ],
+      "spreads": [
+        {
+          "nature": "Bold",
+          "evs": {
+            "hp": 252,
+            "atk": 0,
+            "def": 252,
+            "spa": 0,
+            "spd": 0,
+            "spe": 4
+          },
+          "usagePercent": 100.0
+        }
+      ]
+    },
+    {
+      "speciesKey": "applin-ultra",
+      "displayName": "Applin-Ultra",
+      "speciesId": "applin-ultra",
+      "source": "delta-auto",
+      "aliases": [
+        "Applin-Ultra",
+        "applin-ultra",
+        "applinultra",
+        "Applin Ultra",
+        "applin ultra"
+      ],
+      "abilities": [
+        {
+          "id": "bulletproof",
+          "displayName": "Bulletproof",
+          "type": "ability",
+          "usagePercent": 100.0
+        }
+      ],
+      "items": [
+        {
+          "id": "leftovers",
+          "displayName": "Leftovers",
+          "type": "item",
+          "usagePercent": 100.0
+        }
+      ],
+      "moves": [
+        {
+          "id": "suckerpunch",
+          "displayName": "Sucker Punch",
+          "type": "dark",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "toxic",
+          "displayName": "Toxic",
+          "type": "poison",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "dracometeor",
+          "displayName": "Draco Meteor",
+          "type": "dragon",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "terablast",
+          "displayName": "Tera Blast",
+          "type": "normal",
+          "usagePercent": 100.0
+        }
+      ],
+      "spreads": [
+        {
+          "nature": "Bold",
+          "evs": {
+            "hp": 252,
+            "atk": 0,
+            "def": 252,
+            "spa": 0,
+            "spd": 0,
+            "spe": 4
           },
           "usagePercent": 100.0
         }
@@ -58108,40 +58407,97 @@
     },
     {
       "speciesKey": "cresselia",
-      "speciesId": "cresselia",
       "displayName": "Cresselia",
+      "speciesId": "cresselia",
       "slug": "cresselia",
       "source": "delta-curated",
-      "usageRank": 0,
-      "usagePercent": 0.0,
-      "sampleCount": 0,
       "aliases": [
         "Cresselia",
         "cresselia"
       ],
-      "moves": [
-        {"id": "trick-room", "displayName": "Trick Room", "type": null, "usagePercent": 100.0},
-        {"id": "moonblast", "displayName": "Moonblast", "type": null, "usagePercent": 90.0},
-        {"id": "psychic", "displayName": "Psychic", "type": null, "usagePercent": 70.0},
-        {"id": "lunar-dance", "displayName": "Lunar Dance", "type": null, "usagePercent": 60.0},
-        {"id": "ice-beam", "displayName": "Ice Beam", "type": null, "usagePercent": 30.0},
-        {"id": "moonlight", "displayName": "Moonlight", "type": null, "usagePercent": 30.0}
-      ],
-      "items": [
-        {"id": "mental-herb", "displayName": "Mental Herb", "type": "item", "usagePercent": 55.0},
-        {"id": "leftovers", "displayName": "Leftovers", "type": "item", "usagePercent": 30.0},
-        {"id": "colbur-berry", "displayName": "Colbur Berry", "type": "item", "usagePercent": 15.0}
-      ],
-      "abilities": [
-        {"id": "levitate", "displayName": "Levitate", "type": "ability", "usagePercent": 100.0}
-      ],
       "spreads": [
         {
           "nature": "Relaxed",
-          "evs": {"hp": 252, "atk": 0, "def": 252, "spa": 4, "spd": 0, "spe": 0},
+          "evs": {
+            "hp": 252,
+            "atk": 0,
+            "def": 252,
+            "spa": 4,
+            "spd": 0,
+            "spe": 0
+          },
           "usagePercent": 100.0
         }
-      ]
+      ],
+      "moves": [
+        {
+          "id": "trick-room",
+          "displayName": "Trick Room",
+          "type": null,
+          "usagePercent": 100.0
+        },
+        {
+          "id": "moonblast",
+          "displayName": "Moonblast",
+          "type": null,
+          "usagePercent": 90.0
+        },
+        {
+          "id": "psychic",
+          "displayName": "Psychic",
+          "type": null,
+          "usagePercent": 70.0
+        },
+        {
+          "id": "lunar-dance",
+          "displayName": "Lunar Dance",
+          "type": null,
+          "usagePercent": 60.0
+        },
+        {
+          "id": "ice-beam",
+          "displayName": "Ice Beam",
+          "type": null,
+          "usagePercent": 30.0
+        },
+        {
+          "id": "moonlight",
+          "displayName": "Moonlight",
+          "type": null,
+          "usagePercent": 30.0
+        }
+      ],
+      "items": [
+        {
+          "id": "mental-herb",
+          "displayName": "Mental Herb",
+          "type": "item",
+          "usagePercent": 55.0
+        },
+        {
+          "id": "leftovers",
+          "displayName": "Leftovers",
+          "type": "item",
+          "usagePercent": 30.0
+        },
+        {
+          "id": "colbur-berry",
+          "displayName": "Colbur Berry",
+          "type": "item",
+          "usagePercent": 15.0
+        }
+      ],
+      "abilities": [
+        {
+          "id": "levitate",
+          "displayName": "Levitate",
+          "type": "ability",
+          "usagePercent": 100.0
+        }
+      ],
+      "usageRank": 0,
+      "usagePercent": 0.0,
+      "sampleCount": 0
     },
     {
       "speciesKey": "cresselia-delta",
@@ -60000,6 +60356,75 @@
           "id": "clear-body",
           "displayName": "Clear Body",
           "type": "ability",
+          "usagePercent": 100.0
+        }
+      ],
+      "spreads": [
+        {
+          "nature": "Bold",
+          "evs": {
+            "hp": 252,
+            "atk": 0,
+            "def": 252,
+            "spa": 0,
+            "spd": 0,
+            "spe": 4
+          },
+          "usagePercent": 100.0
+        }
+      ]
+    },
+    {
+      "speciesKey": "dipplin-ultra",
+      "displayName": "Dipplin-Ultra",
+      "speciesId": "dipplin-ultra",
+      "source": "delta-auto",
+      "aliases": [
+        "Dipplin-Ultra",
+        "dipplin-ultra",
+        "dipplinultra",
+        "Dipplin Ultra",
+        "dipplin ultra"
+      ],
+      "abilities": [
+        {
+          "id": "sticky-hold",
+          "displayName": "Sticky Hold",
+          "type": "ability",
+          "usagePercent": 100.0
+        }
+      ],
+      "items": [
+        {
+          "id": "leftovers",
+          "displayName": "Leftovers",
+          "type": "item",
+          "usagePercent": 100.0
+        }
+      ],
+      "moves": [
+        {
+          "id": "dracometeor",
+          "displayName": "Draco Meteor",
+          "type": "dragon",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "sludgebomb",
+          "displayName": "Sludge Bomb",
+          "type": "poison",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "energyball",
+          "displayName": "Energy Ball",
+          "type": "grass",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "recover",
+          "displayName": "Recover",
+          "type": "normal",
           "usagePercent": 100.0
         }
       ],
@@ -67412,6 +67837,75 @@
             "spe": 0
           },
           "usagePercent": 0.96
+        }
+      ]
+    },
+    {
+      "speciesKey": "flapple-ultra",
+      "displayName": "Flapple-Ultra",
+      "speciesId": "flapple-ultra",
+      "source": "delta-auto",
+      "aliases": [
+        "Flapple-Ultra",
+        "flapple-ultra",
+        "flappleultra",
+        "Flapple Ultra",
+        "flapple ultra"
+      ],
+      "abilities": [
+        {
+          "id": "hustle",
+          "displayName": "Hustle",
+          "type": "ability",
+          "usagePercent": 100.0
+        }
+      ],
+      "items": [
+        {
+          "id": "life-orb",
+          "displayName": "Life Orb",
+          "type": "item",
+          "usagePercent": 100.0
+        }
+      ],
+      "moves": [
+        {
+          "id": "outrage",
+          "displayName": "Outrage",
+          "type": "dragon",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "dragonrush",
+          "displayName": "Dragon Rush",
+          "type": "dragon",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "fly",
+          "displayName": "Fly",
+          "type": "flying",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "dragondance",
+          "displayName": "Dragon Dance",
+          "type": "dragon",
+          "usagePercent": 100.0
+        }
+      ],
+      "spreads": [
+        {
+          "nature": "Adamant",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "def": 0,
+            "spa": 0,
+            "spd": 0,
+            "spe": 252
+          },
+          "usagePercent": 100.0
         }
       ]
     },
@@ -83531,6 +84025,122 @@
           "usagePercent": 100.0
         }
       ]
+    },
+    {
+      "speciesKey": "hydrapple-ultra",
+      "displayName": "Hydrapple-Ultra",
+      "speciesId": "hydrapple-ultra",
+      "slug": "hydrapple-ultra",
+      "source": "delta-curated",
+      "aliases": [
+        "Hydrapple-Ultra",
+        "hydrapple-ultra",
+        "hydrappleultra",
+        "Hydrapple Ultra",
+        "hydrapple ultra",
+        "Ultra Hydrapple"
+      ],
+      "spreads": [
+        {
+          "nature": "Modest",
+          "evs": {
+            "hp": 244,
+            "atk": 0,
+            "def": 0,
+            "spa": 252,
+            "spd": 0,
+            "spe": 12
+          },
+          "usagePercent": 80.0
+        },
+        {
+          "nature": "Modest",
+          "evs": {
+            "hp": 252,
+            "atk": 0,
+            "def": 0,
+            "spa": 252,
+            "spd": 0,
+            "spe": 4
+          },
+          "usagePercent": 20.0
+        }
+      ],
+      "moves": [
+        {
+          "id": "fickle-beam",
+          "displayName": "Fickle Beam",
+          "type": null,
+          "usagePercent": 85.0
+        },
+        {
+          "id": "sludge-bomb",
+          "displayName": "Sludge Bomb",
+          "type": null,
+          "usagePercent": 95.0
+        },
+        {
+          "id": "earth-power",
+          "displayName": "Earth Power",
+          "type": null,
+          "usagePercent": 80.0
+        },
+        {
+          "id": "giga-drain",
+          "displayName": "Giga Drain",
+          "type": null,
+          "usagePercent": 65.0
+        },
+        {
+          "id": "nasty-plot",
+          "displayName": "Nasty Plot",
+          "type": null,
+          "usagePercent": 25.0
+        },
+        {
+          "id": "recover",
+          "displayName": "Recover",
+          "type": null,
+          "usagePercent": 20.0
+        }
+      ],
+      "items": [
+        {
+          "id": "assault-vest",
+          "displayName": "Assault Vest",
+          "type": "item",
+          "usagePercent": 75.0
+        },
+        {
+          "id": "leftovers",
+          "displayName": "Leftovers",
+          "type": "item",
+          "usagePercent": 20.0
+        },
+        {
+          "id": "life-orb",
+          "displayName": "Life Orb",
+          "type": "item",
+          "usagePercent": 5.0
+        }
+      ],
+      "abilities": [
+        {
+          "id": "regenerator",
+          "displayName": "Regenerator",
+          "type": "ability",
+          "usagePercent": 80.0
+        },
+        {
+          "id": "spoiledgoods",
+          "displayName": "Spoiled Goods",
+          "type": "ability",
+          "usagePercent": 20.0
+        }
+      ],
+      "usageRank": 0,
+      "usagePercent": 0.0,
+      "sampleCount": 0
     },
     {
       "speciesKey": "hydreigon",
@@ -115342,6 +115952,134 @@
       ]
     },
     {
+      "speciesKey": "sevygarde",
+      "displayName": "Sevygarde",
+      "speciesId": "sevygarde",
+      "slug": "sevygarde",
+      "source": "delta-curated",
+      "aliases": [
+        "Sevygarde",
+        "sevygarde",
+        "Sevigarde",
+        "sevigarde",
+        "Zyviper",
+        "zyviper"
+      ],
+      "spreads": [
+        {
+          "nature": "Careful",
+          "evs": {
+            "hp": 248,
+            "atk": 0,
+            "def": 0,
+            "spa": 0,
+            "spd": 252,
+            "spe": 8
+          },
+          "usagePercent": 60.0
+        },
+        {
+          "nature": "Adamant",
+          "evs": {
+            "hp": 0,
+            "atk": 252,
+            "def": 0,
+            "spa": 0,
+            "spd": 4,
+            "spe": 252
+          },
+          "usagePercent": 40.0
+        }
+      ],
+      "moves": [
+        {
+          "id": "thousand-arrows",
+          "displayName": "Thousand Arrows",
+          "type": null,
+          "usagePercent": 95.0
+        },
+        {
+          "id": "toxic",
+          "displayName": "Toxic",
+          "type": null,
+          "usagePercent": 60.0
+        },
+        {
+          "id": "haze",
+          "displayName": "Haze",
+          "type": null,
+          "usagePercent": 50.0
+        },
+        {
+          "id": "rest",
+          "displayName": "Rest",
+          "type": null,
+          "usagePercent": 50.0
+        },
+        {
+          "id": "extreme-speed",
+          "displayName": "Extreme Speed",
+          "type": null,
+          "usagePercent": 45.0
+        },
+        {
+          "id": "poison-fang",
+          "displayName": "Poison Fang",
+          "type": null,
+          "usagePercent": 40.0
+        },
+        {
+          "id": "poison-jab",
+          "displayName": "Poison Jab",
+          "type": null,
+          "usagePercent": 35.0
+        },
+        {
+          "id": "encore",
+          "displayName": "Encore",
+          "type": null,
+          "usagePercent": 20.0
+        },
+        {
+          "id": "scale-shot",
+          "displayName": "Scale Shot",
+          "type": null,
+          "usagePercent": 15.0
+        }
+      ],
+      "items": [
+        {
+          "id": "leftovers",
+          "displayName": "Leftovers",
+          "type": "item",
+          "usagePercent": 55.0
+        },
+        {
+          "id": "choice-band",
+          "displayName": "Choice Band",
+          "type": "item",
+          "usagePercent": 30.0
+        },
+        {
+          "id": "heavy-duty-boots",
+          "displayName": "Heavy-Duty Boots",
+          "type": "item",
+          "usagePercent": 15.0
+        }
+      ],
+      "abilities": [
+        {
+          "id": "shedskin",
+          "displayName": "Shed Skin",
+          "type": "ability",
+          "usagePercent": 100.0
+        }
+      ],
+      "usageRank": 0,
+      "usagePercent": 0.0,
+      "sampleCount": 0
+    },
+    {
       "speciesKey": "shaykarp",
       "speciesId": "shaykarp",
       "displayName": "Shaykarp",
@@ -130437,6 +131175,75 @@
             "spe": 0
           },
           "usagePercent": 0.42
+        }
+      ]
+    },
+    {
+      "speciesKey": "trapinch-atom",
+      "displayName": "Trapinch-ATOM",
+      "speciesId": "trapinch-atom",
+      "source": "delta-auto",
+      "aliases": [
+        "Trapinch-ATOM",
+        "trapinch-atom",
+        "trapinchatom",
+        "Trapinch ATOM",
+        "trapinch atom"
+      ],
+      "abilities": [
+        {
+          "id": "hyper-cutter",
+          "displayName": "Hyper Cutter",
+          "type": "ability",
+          "usagePercent": 100.0
+        }
+      ],
+      "items": [
+        {
+          "id": "life-orb",
+          "displayName": "Life Orb",
+          "type": "item",
+          "usagePercent": 100.0
+        }
+      ],
+      "moves": [
+        {
+          "id": "crabhammer",
+          "displayName": "Crabhammer",
+          "type": "water",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "firstimpression",
+          "displayName": "First Impression",
+          "type": "bug",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "takedown",
+          "displayName": "Take Down",
+          "type": "normal",
+          "usagePercent": 100.0
+        },
+        {
+          "id": "rest",
+          "displayName": "Rest",
+          "type": "psychic",
+          "usagePercent": 100.0
+        }
+      ],
+      "spreads": [
+        {
+          "nature": "Adamant",
+          "evs": {
+            "hp": 4,
+            "atk": 252,
+            "def": 0,
+            "spa": 0,
+            "spd": 0,
+            "spe": 252
+          },
+          "usagePercent": 100.0
         }
       ]
     },
