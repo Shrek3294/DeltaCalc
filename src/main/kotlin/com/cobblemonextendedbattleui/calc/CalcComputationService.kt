@@ -295,6 +295,67 @@ object CalcComputationService {
     }
 
     /**
+     * Hand-curated map of mega-form key -> intrinsic ability display name.
+     * Keyed by `<species>-mega(-x|-y)?` (lowercase kebab) to match the same
+     * naming convention used in the bundled battle database. Used by
+     * [computeMegaSwap] to overwrite the snapshot's ability when a mega
+     * stone is detected, since the DB itself doesn't carry abilities and
+     * the Cobblemon aspect lookup is unreliable (see v0.9.1.5 notes).
+     *
+     * Source: canonical Gen 6-7 mega ability assignments. Verified against
+     * Bulbapedia entries for each mega.
+     */
+    private val MEGA_ABILITY_BY_FORM_KEY: Map<String, String> = mapOf(
+        "abomasnow-mega" to "Snow Warning",
+        "absol-mega" to "Magic Bounce",
+        "aerodactyl-mega" to "Tough Claws",
+        "aggron-mega" to "Filter",
+        "alakazam-mega" to "Trace",
+        "altaria-mega" to "Pixilate",
+        "ampharos-mega" to "Mold Breaker",
+        "audino-mega" to "Healer",
+        "banette-mega" to "Prankster",
+        "beedrill-mega" to "Adaptability",
+        "blastoise-mega" to "Mega Launcher",
+        "blaziken-mega" to "Speed Boost",
+        "camerupt-mega" to "Sheer Force",
+        "charizard-mega-x" to "Tough Claws",
+        "charizard-mega-y" to "Drought",
+        "diancie-mega" to "Magic Bounce",
+        "gallade-mega" to "Inner Focus",
+        "garchomp-mega" to "Sand Force",
+        "gardevoir-mega" to "Pixilate",
+        "gengar-mega" to "Shadow Tag",
+        "glalie-mega" to "Refrigerate",
+        "gyarados-mega" to "Mold Breaker",
+        "heracross-mega" to "Skill Link",
+        "houndoom-mega" to "Solar Power",
+        "kangaskhan-mega" to "Parental Bond",
+        "latias-mega" to "Levitate",
+        "latios-mega" to "Levitate",
+        "lopunny-mega" to "Scrappy",
+        "lucario-mega" to "Adaptability",
+        "manectric-mega" to "Intimidate",
+        "mawile-mega" to "Huge Power",
+        "medicham-mega" to "Pure Power",
+        "metagross-mega" to "Tough Claws",
+        "mewtwo-mega-x" to "Steadfast",
+        "mewtwo-mega-y" to "Insomnia",
+        "pidgeot-mega" to "No Guard",
+        "pinsir-mega" to "Aerilate",
+        "sableye-mega" to "Magic Bounce",
+        "salamence-mega" to "Aerilate",
+        "sceptile-mega" to "Lightning Rod",
+        "scizor-mega" to "Technician",
+        "sharpedo-mega" to "Strong Jaw",
+        "slowbro-mega" to "Shell Armor",
+        "steelix-mega" to "Sand Force",
+        "swampert-mega" to "Swift Swim",
+        "tyranitar-mega" to "Sand Stream",
+        "venusaur-mega" to "Thick Fat"
+    )
+
+    /**
      * Expands the inferred alternatives lists so the cycle UI always has
      * something to scroll through:
      * - Abilities: merges usage-stat ranking with the species' full legal
@@ -398,15 +459,20 @@ object CalcComputationService {
         // Loses precise IV/EV/nature investment, but stays inside damage-roll
         // variance for typical mega spreads.
         val newActual = CalcBattleSnapshotFactory.derivedHeuristicStats(swap.newBaseStats, player.level)
+        // Override the player's ability with the mega's intrinsic. Pre-mega
+        // the player still holds their base form's ability (Blaze on a
+        // Charizard, Synchronize on a Gardevoir, etc.) — for calc purposes
+        // the trump rule says treat-as-mega, which means the calc should
+        // already be applying Tough Claws / Pixilate / Drought / etc. as
+        // if the user had already pressed mega-evolve.
+        val effectiveAbility = swap.megaAbility ?: player.abilityName
         return player.copy(
             baseStats = swap.newBaseStats,
             actualStats = newActual,
             typeNames = swap.newTypes,
             formName = swap.formNameLabel,
-            speciesLabel = "${player.speciesLabel} (${swap.formNameLabel})"
-            // Keep player.abilityName intact: the player knows their own ability,
-            // which is already the post-mega intrinsic in any well-formed pre-mega
-            // state (Cobblemon swaps the ability on activation). Don't overwrite.
+            speciesLabel = "${player.speciesLabel} (${swap.formNameLabel})",
+            abilityName = effectiveAbility
         )
     }
 
@@ -452,7 +518,11 @@ object CalcComputationService {
             return MegaSwapData(
                 newBaseStats = dbStats,
                 newTypes = dbEntry.typeNames,
-                megaAbility = null, // DB doesn't carry abilities; opponent cycle covers this
+                // Mega's intrinsic ability from the curated map. The DB itself
+                // doesn't carry abilities, so a hand-verified lookup keyed by
+                // the same `<species>-mega(-x|-y)?` form key is the source of
+                // truth for the mega-form ability.
+                megaAbility = MEGA_ABILITY_BY_FORM_KEY[dbKey],
                 formNameLabel = "Mega$formSuffix",
                 aspect = aspect
             )

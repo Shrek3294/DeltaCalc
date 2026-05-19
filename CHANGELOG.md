@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1.6-deltacalc
+
+- Mega-stone trump now swaps the holder's ability to the mega's intrinsic, on both sides. Charizardite Y → Drought, Charizardite X → Tough Claws, Gardevoirite → Pixilate, Mawilite → Huge Power, Mewtwonite X → Steadfast, Mewtwonite Y → Insomnia, etc. Hand-verified for all 47 Gen 6-7 megas. The DB doesn't carry abilities so the trump rule reads from a curated `MEGA_ABILITY_BY_FORM_KEY` map keyed by `<species>-mega(-x|-y)?`. Ability-conditional effects (Tough Claws on contact, Pixilate's Normal→Fairy + 1.2×, etc.) fire automatically as soon as the mega stone is detected. Opponent-side ability override still respects manual user-cycled overrides; player side always overrides since there's no manual-cycle mechanism for the player.
+
 ## 0.9.1.5-deltacalc
 
 - Fix mega-stone cycle not changing damage numbers (the v0.9.1.4 trump rule actually firing). Root cause: `computeMegaSwap` only consulted Cobblemon's `species.getForm(setOf("mega-x"))` to source the mega's base stats, and Cobblemon's actual aspect-name convention for Mega Charizard X / Y (and others) doesn't match `"mega-x"` / `"megax"`, so the lookup silently returned the base form and the swap bailed out. The calc now reads mega base stats directly from the bundled battle database (`charizard-mega-x` → 78/130/111/130/85/100, `charizard-mega-y` → 78/104/78/159/115/100, etc.) — hand-verified for every Gen 6-7 mega — and only falls back to the Cobblemon aspect lookup when the DB doesn't have the entry. Aspect-fallback candidate list also widened (`mega_x`, `x`, `mega-form`) for mods that register megas under non-standard aspects.
