@@ -27,5 +27,37 @@
     },
     "howToApply": "Edit this file, then run: py tools/database/build_battle_database.py"
   },
-  "deltaRanked": []
+  "deltaRanked": [
+    {
+      "speciesKey": "cresselia",
+      "displayName": "Cresselia",
+      "speciesId": "cresselia",
+      "slug": "cresselia",
+      "source": "delta-curated",
+      "aliases": ["Cresselia", "cresselia"],
+      "spreads": [
+        {
+          "nature": "Relaxed",
+          "evs": {"hp": 252, "atk": 0, "def": 252, "spa": 4, "spd": 0, "spe": 0},
+          "usagePercent": 100.0
+        }
+      ],
+      "moves": [
+        {"id": "trick-room", "displayName": "Trick Room", "type": null, "usagePercent": 100.0},
+        {"id": "moonblast", "displayName": "Moonblast", "type": null, "usagePercent": 90.0},
+        {"id": "psychic", "displayName": "Psychic", "type": null, "usagePercent": 70.0},
+        {"id": "lunar-dance", "displayName": "Lunar Dance", "type": null, "usagePercent": 60.0},
+        {"id": "ice-beam", "displayName": "Ice Beam", "type": null, "usagePercent": 30.0},
+        {"id": "moonlight", "displayName": "Moonlight", "type": null, "usagePercent": 30.0}
+      ],
+      "items": [
+        {"id": "mental-herb", "displayName": "Mental Herb", "type": "item", "usagePercent": 55.0},
+        {"id": "leftovers", "displayName": "Leftovers", "type": "item", "usagePercent": 30.0},
+        {"id": "colbur-berry", "displayName": "Colbur Berry", "type": "item", "usagePercent": 15.0}
+      ],
+      "abilities": [
+        {"id": "levitate", "displayName": "Levitate", "type": "ability", "usagePercent": 100.0}
+      ]
+    }
+  ]
 }
