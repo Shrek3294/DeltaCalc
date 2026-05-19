@@ -233,6 +233,67 @@ object CalcComputationService {
         "Eviolite", "Air Balloon", "Black Sludge"
     )
 
+    // Reverse map: species id -> list of mega-stone display names that
+    // species can hold. Used to prepend mega stones to the item cycle UI
+    // for mega-capable species so the user can manually flip Charizard
+    // between Charizardite X and Y, mark a Gardevoir as Gardevoirite, etc.
+    // Display names match MEGA_STONE_FORMS' normalized keys after applying
+    // the same lowercase/strip-spaces transform.
+    private val MEGA_STONES_BY_SPECIES: Map<String, List<String>> = mapOf(
+        "abomasnow" to listOf("Abomasite"),
+        "absol" to listOf("Absolite"),
+        "aerodactyl" to listOf("Aerodactylite"),
+        "aggron" to listOf("Aggronite"),
+        "alakazam" to listOf("Alakazite"),
+        "altaria" to listOf("Altarianite"),
+        "ampharos" to listOf("Ampharosite"),
+        "audino" to listOf("Audinite"),
+        "banette" to listOf("Banettite"),
+        "beedrill" to listOf("Beedrillite"),
+        "blastoise" to listOf("Blastoisinite"),
+        "blaziken" to listOf("Blazikenite"),
+        "camerupt" to listOf("Cameruptite"),
+        "charizard" to listOf("Charizardite X", "Charizardite Y"),
+        "diancie" to listOf("Diancite"),
+        "gallade" to listOf("Galladite"),
+        "garchomp" to listOf("Garchompite"),
+        "gardevoir" to listOf("Gardevoirite"),
+        "gengar" to listOf("Gengarite"),
+        "glalie" to listOf("Glalitite"),
+        "gyarados" to listOf("Gyaradosite"),
+        "heracross" to listOf("Heracronite"),
+        "houndoom" to listOf("Houndoominite"),
+        "kangaskhan" to listOf("Kangaskhanite"),
+        "latias" to listOf("Latiasite"),
+        "latios" to listOf("Latiosite"),
+        "lopunny" to listOf("Lopunnite"),
+        "lucario" to listOf("Lucarionite"),
+        "manectric" to listOf("Manectite"),
+        "mawile" to listOf("Mawilite"),
+        "medicham" to listOf("Medichamite"),
+        "metagross" to listOf("Metagrossite"),
+        "mewtwo" to listOf("Mewtwonite X", "Mewtwonite Y"),
+        "pidgeot" to listOf("Pidgeotite"),
+        "pinsir" to listOf("Pinsirite"),
+        "sableye" to listOf("Sablenite"),
+        "salamence" to listOf("Salamencite"),
+        "sceptile" to listOf("Sceptilite"),
+        "scizor" to listOf("Scizorite"),
+        "sharpedo" to listOf("Sharpedonite"),
+        "slowbro" to listOf("Slowbronite"),
+        "steelix" to listOf("Steelixite"),
+        "swampert" to listOf("Swampertite"),
+        "tyranitar" to listOf("Tyranitarite"),
+        "venusaur" to listOf("Venusaurite")
+    )
+
+    private fun megaStonesForSpecies(speciesId: String?): List<String> {
+        if (speciesId.isNullOrBlank()) return emptyList()
+        // speciesId may be "cobblemon:charizard" or "charizard"; strip namespace.
+        val key = speciesId.substringAfter(':').lowercase().trim()
+        return MEGA_STONES_BY_SPECIES[key].orEmpty()
+    }
+
     /**
      * Expands the inferred alternatives lists so the cycle UI always has
      * something to scroll through:
@@ -271,12 +332,16 @@ object CalcComputationService {
             }
         }
 
-        // Items: append curated common items deduped against usage alternatives.
+        // Items: prepend the species' mega stone(s) (so the user can manually
+        // flip an opponent Charizard between Charizardite X / Y), then append
+        // curated common items, deduped against usage alternatives.
+        val speciesMegaStones = megaStonesForSpecies(opponent.speciesId ?: opponent.speciesKey)
         val knownItemsNorm = inferredSet.itemAlternatives.map(::normalizeToken).toSet()
+        val megaStonesToAdd = speciesMegaStones.filter { normalizeToken(it) !in knownItemsNorm }
         val additionalItems = COMMON_ITEMS.filter { normalizeToken(it) !in knownItemsNorm }
-        val expandedItems = (inferredSet.itemAlternatives + additionalItems)
+        val expandedItems = (megaStonesToAdd + inferredSet.itemAlternatives + additionalItems)
             .distinctBy(::normalizeToken)
-            .take(8)
+            .take(10)
 
         return inferredSet.copy(
             itemAlternatives = expandedItems,
@@ -361,12 +426,49 @@ object CalcComputationService {
     private fun computeMegaSwap(snapshot: CalcPokemonSnapshot, itemName: String?): MegaSwapData? {
         val aspect = megaFormAspect(itemName) ?: return null
         val baseSpeciesId = snapshot.speciesId ?: return null
+        val baseSpeciesKey = baseSpeciesId.substringAfter(':').lowercase().trim()
+        val formSuffix = when (aspect) {
+            "mega-x" -> " X"
+            "mega-y" -> " Y"
+            else -> ""
+        }
+
+        // PRIMARY SOURCE: the bundled battle database. It has hand-verified
+        // mega base stats / types for every Gen 6-7 mega + Delta megas, indexed
+        // by `<species>-mega`, `<species>-mega-x`, `<species>-mega-y`. The
+        // earlier Cobblemon-only `species.getForm(setOf("mega-x"))` path
+        // silently failed for X/Y megas (Charizardite X cycle didn't change
+        // damage) because Cobblemon's actual form aspect names don't match
+        // our "mega-x" assumption.
+        val dbKey = when (aspect) {
+            "mega-x" -> "$baseSpeciesKey-mega-x"
+            "mega-y" -> "$baseSpeciesKey-mega-y"
+            else -> "$baseSpeciesKey-mega"
+        }
+        val dbEntry = battleDatabase.findSpecies(dbKey)
+        if (dbEntry != null && dbEntry.baseStats != null) {
+            val b = dbEntry.baseStats!!
+            val dbStats = CalcStats(b.hp, b.atk, b.def, b.spa, b.spd, b.spe)
+            return MegaSwapData(
+                newBaseStats = dbStats,
+                newTypes = dbEntry.typeNames,
+                megaAbility = null, // DB doesn't carry abilities; opponent cycle covers this
+                formNameLabel = "Mega$formSuffix",
+                aspect = aspect
+            )
+        }
+
+        // FALLBACK: Cobblemon's PokemonSpecies API via aspect lookup. Kept for
+        // species missing from the DB (e.g. brand-new mods). Tries multiple
+        // aspect spellings since different mods register megas differently.
         val identifier = resolveSpeciesIdentifier(baseSpeciesId) ?: return null
         val species = PokemonSpecies.getByIdentifier(identifier) ?: return null
         val standard = species.standardForm
-        val candidates = if (aspect == "mega-x") listOf("mega-x", "megax")
-            else if (aspect == "mega-y") listOf("mega-y", "megay")
-            else listOf("mega")
+        val candidates = when (aspect) {
+            "mega-x" -> listOf("mega-x", "megax", "mega_x", "x")
+            "mega-y" -> listOf("mega-y", "megay", "mega_y", "y")
+            else -> listOf("mega", "mega-form", "megaform")
+        }
         val megaForm = candidates.firstNotNullOfOrNull { variant ->
             runCatching { species.getForm(setOf(variant)) }.getOrNull()?.takeIf { it != standard }
         } ?: return null
@@ -383,11 +485,6 @@ object CalcComputationService {
         val megaAbility = runCatching {
             megaForm.abilities.mapNotNull { it.template.name }.firstOrNull()
         }.getOrNull()
-        val formSuffix = when (aspect) {
-            "mega-x" -> " X"
-            "mega-y" -> " Y"
-            else -> ""
-        }
         return MegaSwapData(newBaseStats, newTypes, megaAbility, "Mega$formSuffix", aspect)
     }
 

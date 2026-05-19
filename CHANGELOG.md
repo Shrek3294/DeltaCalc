@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.1.5-deltacalc
+
+- Fix mega-stone cycle not changing damage numbers (the v0.9.1.4 trump rule actually firing). Root cause: `computeMegaSwap` only consulted Cobblemon's `species.getForm(setOf("mega-x"))` to source the mega's base stats, and Cobblemon's actual aspect-name convention for Mega Charizard X / Y (and others) doesn't match `"mega-x"` / `"megax"`, so the lookup silently returned the base form and the swap bailed out. The calc now reads mega base stats directly from the bundled battle database (`charizard-mega-x` → 78/130/111/130/85/100, `charizard-mega-y` → 78/104/78/159/115/100, etc.) — hand-verified for every Gen 6-7 mega — and only falls back to the Cobblemon aspect lookup when the DB doesn't have the entry. Aspect-fallback candidate list also widened (`mega_x`, `x`, `mega-form`) for mods that register megas under non-standard aspects.
+- Surfaced mega stones in the opponent item-cycle UI. Charizard now shows Charizardite X / Charizardite Y as cycle options, Gardevoir gets Gardevoirite, etc., for every Gen 6-7 mega-capable species — previously the cycle only included usage-derived items plus a generic common-items list, so reaching a mega stone via cycle required the species' competitive usage data to include it.
+
 ## 0.9.1.4-deltacalc
 
 - Mega-stone trump rule for both sides: when the held item is a mega stone matching the species, the calc now forces the snapshot into its mega form (base stats, types, intrinsic ability) regardless of Cobblemon's live form. Previously this only applied to the opponent; the player side respected `partyPokemon` stats, which silently downgraded the calc when (a) the player hadn't pressed mega-evolve yet or (b) Cobblemon's post-switch-in visual glitch reverted the sprite to base form. Player `actualStats` are now re-derived heuristically from the new mega base stats whenever a mega stone is detected (precision trade-off vs. always-correct mega base; accepted per user direction). Only triggers on items in the mega-stone table — non-mega items never override live state.
