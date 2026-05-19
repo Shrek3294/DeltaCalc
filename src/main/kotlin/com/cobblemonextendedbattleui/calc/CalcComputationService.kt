@@ -56,21 +56,23 @@ object CalcComputationService {
             val rawInferredSet = inferenceService.infer(snapshot, selectedOpponent, battleDatabase)
             val inferredSet = expandAlternatives(rawInferredSet, selectedOpponent)
             val overrideMerged = applyOverride(inferredSet, selectedOpponent)
-            // When the effective item is a mega stone, swap the opponent's
-            // species data to its mega form so damage / speed / types reflect
-            // post-mega stats, even when the in-battle mega evolution hasn't
-            // fired yet. Re-points effectiveSet's ability at the mega form's
-            // intrinsic ability when the user hasn't overridden it.
+            // Mega-stone trump rule: whenever a known/inferred mega stone is
+            // held by either side, force the snapshot into its mega form for
+            // the calc. This wins over whatever Cobblemon's live state says
+            // (e.g. the user hasn't pressed mega-evolve yet, or post-mega
+            // switch-in shows the base sprite via the visual glitch). Applies
+            // only when the held item is a mega stone matched to the species.
             val (effectiveOpponent, effectiveSet) = applyMegaFormSwap(selectedOpponent, overrideMerged)
+            val effectivePlayer = applyPlayerMegaSwap(selectedPlayer)
             val reasons = invalidationCoordinator.consumeReasons()
-            val switchPreview = buildSwitchPreview(selectedPlayer, snapshot)
+            val switchPreview = buildSwitchPreview(effectivePlayer, snapshot)
             val damageResult = damageEngine.compute(
                 snapshot = snapshot,
-                playerSnapshot = selectedPlayer,
+                playerSnapshot = effectivePlayer,
                 opponentSnapshot = effectiveOpponent,
                 inferredSet = effectiveSet,
                 playerEffectiveCurrentHp = switchPreview.effectiveCurrentHp,
-                emphasizeSelectedMove = selectedPlayer?.uuid == snapshot.playerActiveUuid
+                emphasizeSelectedMove = effectivePlayer?.uuid == snapshot.playerActiveUuid
             )
             val reasonText = if (reasons.isEmpty()) {
                 "Snapshot stable"
@@ -93,21 +95,21 @@ object CalcComputationService {
             }
             currentModel = CalcRenderModel(
                 snapshot = snapshot,
-                selectedPlayerUuid = selectedPlayer?.uuid,
+                selectedPlayerUuid = effectivePlayer?.uuid,
                 selectedOpponentUuid = selectedOpponent?.uuid,
-                selectedPlayer = selectedPlayer,
+                selectedPlayer = effectivePlayer,
                 selectedOpponent = effectiveOpponent,
-                playerTabs = buildTabs(snapshot.playerTeam, selectedPlayer?.uuid, snapshot.playerActiveUuid),
+                playerTabs = buildTabs(snapshot.playerTeam, effectivePlayer?.uuid, snapshot.playerActiveUuid),
                 opponentTabs = buildTabs(snapshot.opponentTeam, selectedOpponent?.uuid, snapshot.opponentActiveUuid),
-                matchupLabel = buildMatchupLabel(selectedPlayer, effectiveOpponent),
+                matchupLabel = buildMatchupLabel(effectivePlayer, effectiveOpponent),
                 switchSummaryText = switchPreview.summaryText,
                 hazardNoteText = switchPreview.hazardNoteText,
-                isPreview = selectedPlayer?.uuid != snapshot.playerActiveUuid || selectedOpponent?.uuid != snapshot.opponentActiveUuid,
+                isPreview = effectivePlayer?.uuid != snapshot.playerActiveUuid || selectedOpponent?.uuid != snapshot.opponentActiveUuid,
                 opponentSet = effectiveSet,
                 yourMoves = damageResult.yourMoves.map(::toRow),
                 opponentMoves = damageResult.opponentMoves.map(::toRow),
                 statusText = listOfNotNull(reasonText, warningText).joinToString(" | "),
-                speedText = buildSpeedText(selectedPlayer, effectiveOpponent, effectiveSet),
+                speedText = buildSpeedText(effectivePlayer, effectiveOpponent, effectiveSet),
                 debugText = debugText
             )
             lastSelectionFingerprint = selectionFingerprint
@@ -311,6 +313,85 @@ object CalcComputationService {
     }
 
     /**
+     * Player-side mega-stone trump: when the player's known held item is a
+     * mega stone that matches their species, swap the snapshot to that mega
+     * form for calc purposes (base stats, types, ability) regardless of
+     * Cobblemon's live form. Re-derives actualStats heuristically from the
+     * new base stats because partyPokemon.stats reflect the base form until
+     * the mega evolution actually fires (and during the post-mega switch-in
+     * visual glitch, they revert there too).
+     *
+     * Only applies to mega stones — never overrides live state for any other
+     * item type.
+     */
+    private fun applyPlayerMegaSwap(player: CalcPokemonSnapshot?): CalcPokemonSnapshot? {
+        player ?: return null
+        val itemName = player.itemName ?: return player
+        val swap = computeMegaSwap(player, itemName) ?: return player
+        // For the player we still want some actualStats — derive heuristically
+        // from the new base stats so the engine has numbers to work with.
+        // Loses precise IV/EV/nature investment, but stays inside damage-roll
+        // variance for typical mega spreads.
+        val newActual = CalcBattleSnapshotFactory.derivedHeuristicStats(swap.newBaseStats, player.level)
+        return player.copy(
+            baseStats = swap.newBaseStats,
+            actualStats = newActual,
+            typeNames = swap.newTypes,
+            formName = swap.formNameLabel,
+            speciesLabel = "${player.speciesLabel} (${swap.formNameLabel})"
+            // Keep player.abilityName intact: the player knows their own ability,
+            // which is already the post-mega intrinsic in any well-formed pre-mega
+            // state (Cobblemon swaps the ability on activation). Don't overwrite.
+        )
+    }
+
+    /**
+     * Shared mega-stone -> form data lookup. Returns null when the item is
+     * not a mega stone, when the species has no matching mega form, or when
+     * the form lookup fails.
+     */
+    private data class MegaSwapData(
+        val newBaseStats: CalcStats,
+        val newTypes: List<String>,
+        val megaAbility: String?,
+        val formNameLabel: String,
+        val aspect: String
+    )
+
+    private fun computeMegaSwap(snapshot: CalcPokemonSnapshot, itemName: String?): MegaSwapData? {
+        val aspect = megaFormAspect(itemName) ?: return null
+        val baseSpeciesId = snapshot.speciesId ?: return null
+        val identifier = resolveSpeciesIdentifier(baseSpeciesId) ?: return null
+        val species = PokemonSpecies.getByIdentifier(identifier) ?: return null
+        val standard = species.standardForm
+        val candidates = if (aspect == "mega-x") listOf("mega-x", "megax")
+            else if (aspect == "mega-y") listOf("mega-y", "megay")
+            else listOf("mega")
+        val megaForm = candidates.firstNotNullOfOrNull { variant ->
+            runCatching { species.getForm(setOf(variant)) }.getOrNull()?.takeIf { it != standard }
+        } ?: return null
+
+        val newBaseStats = CalcStats(
+            hp = megaForm.baseStats[Stats.HP] ?: snapshot.baseStats?.hp ?: 0,
+            atk = megaForm.baseStats[Stats.ATTACK] ?: snapshot.baseStats?.atk ?: 0,
+            def = megaForm.baseStats[Stats.DEFENCE] ?: snapshot.baseStats?.def ?: 0,
+            spa = megaForm.baseStats[Stats.SPECIAL_ATTACK] ?: snapshot.baseStats?.spa ?: 0,
+            spd = megaForm.baseStats[Stats.SPECIAL_DEFENCE] ?: snapshot.baseStats?.spd ?: 0,
+            spe = megaForm.baseStats[Stats.SPEED] ?: snapshot.baseStats?.spe ?: 0
+        )
+        val newTypes = listOfNotNull(megaForm.primaryType?.name, megaForm.secondaryType?.name)
+        val megaAbility = runCatching {
+            megaForm.abilities.mapNotNull { it.template.name }.firstOrNull()
+        }.getOrNull()
+        val formSuffix = when (aspect) {
+            "mega-x" -> " X"
+            "mega-y" -> " Y"
+            else -> ""
+        }
+        return MegaSwapData(newBaseStats, newTypes, megaAbility, "Mega$formSuffix", aspect)
+    }
+
+    /**
      * If the effective item is a mega stone for the opponent's species, swaps the
      * opponent snapshot to that mega form (new base stats, types, intrinsic
      * ability if not user-overridden) so damage / speed reflect post-mega values.
@@ -322,51 +403,22 @@ object CalcComputationService {
     ): Pair<CalcPokemonSnapshot?, EffectiveBattleSet> {
         opponent ?: return null to effectiveSet
         val itemName = effectiveSet.item.first ?: return opponent to effectiveSet
-        val aspect = megaFormAspect(itemName) ?: return opponent to effectiveSet
+        val swap = computeMegaSwap(opponent, itemName) ?: return opponent to effectiveSet
 
-        val baseSpeciesId = opponent.speciesId ?: return opponent to effectiveSet
-        val identifier = resolveSpeciesIdentifier(baseSpeciesId) ?: return opponent to effectiveSet
-        val species = PokemonSpecies.getByIdentifier(identifier) ?: return opponent to effectiveSet
-        val standard = species.standardForm
-        val candidates = if (aspect == "mega-x") listOf("mega-x", "megax")
-            else if (aspect == "mega-y") listOf("mega-y", "megay")
-            else listOf("mega")
-        val megaForm = candidates.firstNotNullOfOrNull { variant ->
-            runCatching { species.getForm(setOf(variant)) }.getOrNull()?.takeIf { it != standard }
-        } ?: return opponent to effectiveSet
-
-        val newBaseStats = CalcStats(
-            hp = megaForm.baseStats[Stats.HP] ?: opponent.baseStats?.hp ?: 0,
-            atk = megaForm.baseStats[Stats.ATTACK] ?: opponent.baseStats?.atk ?: 0,
-            def = megaForm.baseStats[Stats.DEFENCE] ?: opponent.baseStats?.def ?: 0,
-            spa = megaForm.baseStats[Stats.SPECIAL_ATTACK] ?: opponent.baseStats?.spa ?: 0,
-            spd = megaForm.baseStats[Stats.SPECIAL_DEFENCE] ?: opponent.baseStats?.spd ?: 0,
-            spe = megaForm.baseStats[Stats.SPEED] ?: opponent.baseStats?.spe ?: 0
-        )
-        val newTypes = listOfNotNull(megaForm.primaryType?.name, megaForm.secondaryType?.name)
-        val megaAbility = runCatching {
-            megaForm.abilities.mapNotNull { it.template.name }.firstOrNull()
-        }.getOrNull()
-
-        val formSuffix = when (aspect) {
-            "mega-x" -> " X"
-            "mega-y" -> " Y"
-            else -> ""
-        }
         val transformedOpponent = opponent.copy(
-            baseStats = newBaseStats,
-            actualStats = null, // re-derive from new base stats
-            typeNames = newTypes,
-            formName = "Mega$formSuffix",
-            speciesLabel = "${opponent.speciesLabel} (Mega$formSuffix)",
+            baseStats = swap.newBaseStats,
+            actualStats = null, // re-derive from new base stats via inferred spread
+            typeNames = swap.newTypes,
+            formName = swap.formNameLabel,
+            speciesLabel = "${opponent.speciesLabel} (${swap.formNameLabel})",
             // Null out so the EffectiveBattleSet's ability wins downstream — this
             // lets the mega form's intrinsic ability (filled in below) apply.
             abilityName = null
         )
 
         val abilityOverridden = overrides[opponent.uuid]?.abilityIndex != null
-        val nextAbility = if (!abilityOverridden && !megaAbility.isNullOrBlank()) {
-            megaAbility to InferenceValueState.REVEALED
+        val nextAbility = if (!abilityOverridden && !swap.megaAbility.isNullOrBlank()) {
+            swap.megaAbility to InferenceValueState.REVEALED
         } else {
             effectiveSet.ability
         }

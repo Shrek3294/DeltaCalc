@@ -358,13 +358,15 @@ object CalcBattleSnapshotFactory {
 
     /**
      * Heuristic stat block for the player side when partyPokemon is null
-     * (custom-rule clone battles, lvl 50 cap, random battle, etc.). Picks
-     * the same offensive/defensive spread shape that build_default_delta_sets.py
-     * uses on the data-pipeline side, then runs Cobblemon's standard
-     * level/IV/EV/nature math to produce final stats. Approximate but
-     * within damage-roll variance, and revealed info tightens it from there.
+     * (custom-rule clone battles, lvl 50 cap, random battle, etc.) and for
+     * mega-stone swaps that need a quick re-derive from new base stats.
+     * Picks the same offensive/defensive spread shape that
+     * build_default_delta_sets.py uses on the data-pipeline side, then runs
+     * Cobblemon's standard level/IV/EV/nature math to produce final stats.
+     * Approximate but within damage-roll variance, and revealed info
+     * tightens it from there.
      */
-    private fun derivedHeuristicStats(base: CalcStats, level: Int): CalcStats {
+    internal fun derivedHeuristicStats(base: CalcStats, level: Int): CalcStats {
         val isPhysical = base.atk >= base.spa
         val offensiveScore = maxOf(base.atk, base.spa) + base.spe
         val defensiveScore = base.hp + maxOf(base.def, base.spd)
