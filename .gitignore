@@ -1,17 +1,28 @@
+# Gradle and build artifacts
 .gradle/
 .kotlin/
 build/
 run/
 out/
+
+# IDE and OS
 .idea/
-__pycache__/
-*.pyc
+.vscode/
 *.iml
 *.ipr
 *.iws
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Archives and binaries
+*.jar
+*.zip
+*.tar.gz
+
+# Python caches and generated DB temp files
+__pycache__/
+*.pyc
 tools/database/generated/
 
 # Local agent / debug clutter
@@ -20,3 +31,5 @@ tools/database/generated/
 .codex_tmp_delta/
 battleinfo/
 *.bak
+CobblemonExtendedBattleUI-main/
+cobblemon-delta-pokemon-team-builder.json

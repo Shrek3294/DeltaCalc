@@ -1,0 +1,32 @@
+name: Feature Request
+description: Suggest an idea, UI improvement, or new mechanic for DeltaCalc.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting an improvement to DeltaCalc!
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Feature Summary
+      description: What feature or enhancement would you like to see?
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation
+      description: Is your feature request related to a specific problem or limitation?
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternative
+    attributes:
+      label: Proposed Solution or Alternatives
+      description: Describe your proposed design, UI layout, or any alternative solutions considered.
+    validations:
+      required: false

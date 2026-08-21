@@ -1,0 +1,63 @@
+name: New Delta Pokémon / Form Submission
+description: Submit stats, typing, abilities, or movesets for a new Cobblemon Delta species or custom form.
+labels: ["delta-data", "species-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to submit or update data for custom Cobblemon Delta Pokémon so they can be added to DeltaCalc's battle database.
+
+  - type: input
+    id: pokemon_name
+    attributes:
+      label: Species Name & Form
+      description: Name of the Pokémon and variant (e.g. `Hydrapple-Ultra`, `Sevygarde`, `Trapinch-ATOM`).
+      placeholder: e.g. Hydrapple-Ultra
+    validations:
+      required: true
+
+  - type: input
+    id: typing
+    attributes:
+      label: Typing
+      description: Primary and secondary types.
+      placeholder: e.g. Grass / Dragon
+    validations:
+      required: true
+
+  - type: input
+    id: base_stats
+    attributes:
+      label: Base Stats
+      description: HP / Atk / Def / SpA / SpD / Spe
+      placeholder: e.g. 106 / 80 / 110 / 120 / 80 / 44
+    validations:
+      required: true
+
+  - type: textarea
+    id: abilities
+    attributes:
+      label: Abilities
+      description: Primary, secondary, and hidden abilities (including any custom abilities & their effects).
+      placeholder: |
+        - Supersweet Syrup
+        - Regenerator
+        - Sticky Hold (Hidden)
+    validations:
+      required: true
+
+  - type: textarea
+    id: signature_moves
+    attributes:
+      label: Key / Signature Moves
+      description: Any notable moves, custom signature moves, base power, category, or flags.
+    validations:
+      required: false
+
+  - type: input
+    id: source
+    attributes:
+      label: Source Reference
+      description: Where is this data documented? (e.g. Cobblemon Delta Discord channel, official announcement, etc.)
+    validations:
+      required: false
