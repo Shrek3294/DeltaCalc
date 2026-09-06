@@ -4,6 +4,7 @@ import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.render.drawScaledText
 import com.cobblemon.mod.common.util.cobblemonResource
 import com.cobblemonextendedbattleui.ui.shared.NineSliceRenderer
+import com.cobblemonextendedbattleui.ui.shared.ResponsiveGeometry
 import com.cobblemonextendedbattleui.ui.shared.ScrollbarRenderer
 import com.cobblemonextendedbattleui.ui.shared.WidgetInteractionHandler
 import com.mojang.blaze3d.systems.RenderSystem
@@ -145,6 +146,74 @@ object BattleLogWidget {
                mouseY >= widgetY && mouseY <= widgetY + widgetH
     }
 
+    internal data class LogBounds(
+        val x: Int,
+        val y: Int,
+        val width: Int,
+        val height: Int,
+        val expandedHeight: Int,
+        val collapsedHeight: Int
+    )
+
+    internal fun reconcileBounds(
+        savedX: Int?,
+        savedY: Int?,
+        savedWidth: Int?,
+        savedHeight: Int?,
+        isExpanded: Boolean,
+        screenWidth: Int,
+        screenHeight: Int
+    ): LogBounds {
+        if (screenWidth <= 0 || screenHeight <= 0) {
+            return LogBounds(x = 0, y = 0, width = 0, height = 0, expandedHeight = 0, collapsedHeight = 0)
+        }
+
+        val minW = PanelConfig.MIN_LOG_WIDTH
+        val maxW = minOf(screenWidth, PanelConfig.MAX_LOG_WIDTH)
+        val width = ResponsiveGeometry.safeClampDimension(
+            value = savedWidth ?: PanelConfig.DEFAULT_LOG_WIDTH,
+            preferredMin = minW,
+            maxAllowed = maxW
+        )
+
+        val minH = PanelConfig.MIN_LOG_HEIGHT
+        val maxH = minOf(screenHeight, PanelConfig.MAX_LOG_HEIGHT)
+        val expandedHeight = ResponsiveGeometry.safeClampDimension(
+            value = savedHeight ?: PanelConfig.DEFAULT_LOG_HEIGHT,
+            preferredMin = minH,
+            maxAllowed = maxH
+        )
+        val collapsedHeight = ResponsiveGeometry.safeClampDimension(
+            value = COLLAPSED_HEIGHT,
+            preferredMin = minOf(COLLAPSED_HEIGHT, minH),
+            maxAllowed = maxH
+        )
+        val height = if (isExpanded) expandedHeight else collapsedHeight
+
+        val defaultX = screenWidth - width - 10
+        val defaultBottomY = screenHeight.toLong() - 55L
+
+        val bottomY = if (savedY != null) {
+            savedY.toLong() + expandedHeight.toLong()
+        } else {
+            defaultBottomY
+        }
+        val candidateY = (bottomY - height.toLong()).coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
+        val candidateX = savedX ?: defaultX
+
+        val x = ResponsiveGeometry.clampCoord(candidateX, width, screenWidth)
+        val y = ResponsiveGeometry.clampCoord(candidateY, height, screenHeight)
+
+        return LogBounds(
+            x = x,
+            y = y,
+            width = width,
+            height = height,
+            expandedHeight = expandedHeight,
+            collapsedHeight = collapsedHeight
+        )
+    }
+
     fun render(context: DrawContext) {
         if (!PanelConfig.enableBattleLog) return
         val battle = CobblemonClient.battle ?: return
@@ -157,35 +226,42 @@ object BattleLogWidget {
         // Update line height based on font scale
         lineHeight = (BASE_LINE_HEIGHT * PanelConfig.logFontScale).toInt().coerceAtLeast(8)
 
+        val screenWidth = mc.window.scaledWidth
+        val screenHeight = mc.window.scaledHeight
+
+        val bounds = reconcileBounds(
+            savedX = PanelConfig.logX,
+            savedY = PanelConfig.logY,
+            savedWidth = PanelConfig.logWidth,
+            savedHeight = PanelConfig.logHeight,
+            isExpanded = PanelConfig.logExpanded,
+            screenWidth = screenWidth,
+            screenHeight = screenHeight
+        )
+
+        val minSafeW = 30
+        val minSafeH = HEADER_HEIGHT + 14 + 8
+        if (bounds.width < minSafeW || bounds.height < minSafeH || screenWidth <= 0 || screenHeight <= 0) {
+            interaction.releaseAll()
+            wasMousePressed = false
+            return
+        }
+
+        widgetX = bounds.x
+        widgetY = bounds.y
+        widgetW = bounds.width
+        widgetH = bounds.height
+        headerEndY = bounds.y + HEADER_HEIGHT
+
         // Skip input handling when minimized (read-only)
         if (!isMinimised) {
             handleInput(mc)
         }
 
-        val screenWidth = mc.window.scaledWidth
-        val screenHeight = mc.window.scaledHeight
-
-        val isExpanded = PanelConfig.logExpanded
-
-        // Get dimensions from config or use defaults
-        val width = PanelConfig.logWidth ?: PanelConfig.DEFAULT_LOG_WIDTH
-        val expandedHeight = PanelConfig.logHeight ?: PanelConfig.DEFAULT_LOG_HEIGHT
-        val height = if (isExpanded) expandedHeight else COLLAPSED_HEIGHT
-
-        // Default position: bottom right, above battle controls
-        // We track position by BOTTOM edge so collapse/expand keeps bottom fixed
-        val defaultX = screenWidth - width - 10  // 10px from right edge
-        val defaultBottomY = screenHeight - 55  // Bottom edge position
-
-        // Calculate Y from bottom edge (collapse downwards behavior)
-        val bottomY = (PanelConfig.logY ?: (defaultBottomY - expandedHeight)) + expandedHeight
-        val y = (bottomY - height).coerceIn(0, screenHeight - height)
-        val x = (PanelConfig.logX ?: defaultX).coerceIn(0, screenWidth - width)
-
-        widgetX = x
-        widgetY = y
-        widgetW = width
-        widgetH = height
+        val x = widgetX
+        val y = widgetY
+        val width = widgetW
+        val height = widgetH
 
         // Apply opacity for minimized state (greys out like Cobblemon's BattleOverlay)
         // Must enable blending for texture alpha to work correctly
@@ -195,16 +271,15 @@ object BattleLogWidget {
         RenderSystem.setShaderColor(1f, 1f, 1f, opacity)
 
         // Render frame using 9-slice with Cobblemon textures
-        renderFrame9Slice(context, x, y, width, height, isExpanded)
+        renderFrame9Slice(context, x, y, width, height, PanelConfig.logExpanded)
         // Flush texture batch before any fill operations
         context.draw()
-        headerEndY = y + HEADER_HEIGHT
 
         // Always render the same content - "collapsed" is just a smaller preset size
         renderContent(context, x, y, width, height)
 
         // Resize handles only when expanded and not minimized (minimized = read-only)
-        if (!isMinimised && isExpanded && (interaction.hoveredZone != UIUtils.ResizeZone.NONE || interaction.isResizing)) {
+        if (!isMinimised && PanelConfig.logExpanded && (interaction.hoveredZone != UIUtils.ResizeZone.NONE || interaction.isResizing)) {
             renderResizeHandles(context, x, y, width, height)
         }
 
@@ -361,6 +436,9 @@ object BattleLogWidget {
                     val pos = interaction.updateDrag(mouseX, mouseY, screenWidth, screenHeight, widgetW, widgetH)
                     if (pos != null) {
                         PanelConfig.setLogPosition(pos.first, pos.second)
+                        widgetX = pos.first
+                        widgetY = pos.second
+                        headerEndY = widgetY + HEADER_HEIGHT
                     }
                 }
             }
@@ -461,6 +539,11 @@ object BattleLogWidget {
 
         PanelConfig.setLogDimensions(result.newWidth, result.newHeight)
         PanelConfig.setLogPosition(result.newX, result.newY)
+        widgetX = result.newX
+        widgetY = result.newY
+        widgetW = result.newWidth
+        widgetH = result.newHeight
+        headerEndY = widgetY + HEADER_HEIGHT
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -526,13 +609,17 @@ object BattleLogWidget {
     private fun renderContent(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
         // Content area (leave space at bottom for texture's built-in arrow area)
         val contentY = y + HEADER_HEIGHT
-        val contentAreaHeight = height - HEADER_HEIGHT - 14  // Space at bottom for arrow region
+        val contentAreaHeight = (height - HEADER_HEIGHT - 14).coerceAtLeast(0)
 
         // Calculate text width (assume scrollbar present for height calc to avoid circular dependency)
         val fullContentX = x + PADDING  // Full width start (for separators)
         val textStartX = x + PADDING + LOG_TEXT_INDENT  // Indented start (for text)
-        val maxFullContentWidth = width - PADDING * 2 - SCROLLBAR_WIDTH - 4  // Assume scrollbar for height calc
-        val maxTextContentWidth = maxFullContentWidth - LOG_TEXT_INDENT
+        val maxFullContentWidth = (width - PADDING * 2 - SCROLLBAR_WIDTH - 4).coerceAtLeast(0)
+        val maxTextContentWidth = (maxFullContentWidth - LOG_TEXT_INDENT).coerceAtLeast(0)
+
+        if (contentAreaHeight <= 0 || maxTextContentWidth <= 0) {
+            return
+        }
 
         // Calculate content height with text wrapping
         val mc = MinecraftClient.getInstance()
@@ -556,8 +643,12 @@ object BattleLogWidget {
 
         // Now calculate actual widths based on whether scrollbar is needed
         val scrollbarSpace = if (contentHeight > visibleHeight) SCROLLBAR_WIDTH + 4 else 0
-        val fullContentWidth = width - PADDING * 2 - scrollbarSpace
-        val textContentWidth = fullContentWidth - LOG_TEXT_INDENT
+        val fullContentWidth = (width - PADDING * 2 - scrollbarSpace).coerceAtLeast(0)
+        val textContentWidth = (fullContentWidth - LOG_TEXT_INDENT).coerceAtLeast(0)
+
+        if (fullContentWidth <= 0 || textContentWidth <= 0) {
+            return
+        }
 
         // Render log entries with scissor (use full width for scissor to allow separators)
         enableScissor(context, fullContentX, contentY, fullContentWidth, contentAreaHeight)
@@ -571,6 +662,7 @@ object BattleLogWidget {
     }
 
     private fun calculateContentHeight(mc: MinecraftClient, textWidth: Int): Int {
+        if (textWidth <= 0) return lineHeight
         val entries = BattleLog.getEntries()
         if (entries.isEmpty()) return lineHeight
 
@@ -604,10 +696,10 @@ object BattleLogWidget {
      * Wraps text into multiple lines that fit within the given width.
      */
     private fun wrapText(mc: MinecraftClient, text: String, maxWidth: Int, scale: Float): List<String> {
-        if (text.isEmpty()) return listOf("")
+        if (text.isEmpty() || maxWidth <= 0 || scale <= 0f) return listOf("")
 
         val textRenderer = mc.textRenderer
-        val scaledMaxWidth = (maxWidth / scale).toInt()
+        val scaledMaxWidth = (maxWidth / scale).toInt().coerceAtLeast(1)
 
         val lines = mutableListOf<String>()
         val words = text.split(" ")
@@ -723,6 +815,7 @@ object BattleLogWidget {
     }
 
     private fun renderScrollbar(context: DrawContext, x: Int, y: Int, height: Int) {
+        if (height <= 0 || visibleHeight <= 0) return
         scrollbar.render(context, x, y, height, contentHeight, visibleHeight, scrollOffset)
     }
 

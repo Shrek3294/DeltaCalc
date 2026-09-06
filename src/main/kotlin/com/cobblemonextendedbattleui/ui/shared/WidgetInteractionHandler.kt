@@ -74,9 +74,15 @@ class WidgetInteractionHandler(
             hasDragged = true
         }
 
-        val newX = (mouseX - dragOffsetX).coerceIn(0, screenWidth - widgetW)
-        val newY = (mouseY - dragOffsetY).coerceIn(0, screenHeight - widgetH)
-        return Pair(newX, newY)
+        val clamped = ResponsiveGeometry.clampPosition(
+            candidateX = mouseX - dragOffsetX,
+            candidateY = mouseY - dragOffsetY,
+            widgetWidth = widgetW,
+            widgetHeight = widgetH,
+            viewportWidth = screenWidth,
+            viewportHeight = screenHeight
+        )
+        return Pair(clamped.x, clamped.y)
     }
 
     /**

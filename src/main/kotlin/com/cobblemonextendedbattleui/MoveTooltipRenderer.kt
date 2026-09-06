@@ -10,6 +10,8 @@ import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.battle.ClientBattlePokemon
 import com.cobblemon.mod.common.client.render.drawScaledText
 import com.cobblemon.mod.common.pokemon.Pokemon
+import com.cobblemonextendedbattleui.ui.shared.LayoutPoint
+import com.cobblemonextendedbattleui.ui.shared.ResponsiveGeometry
 import com.mojang.blaze3d.systems.RenderSystem
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.font.TextRenderer
@@ -37,6 +39,53 @@ object MoveTooltipRenderer {
 
     private const val TOOLTIP_BASE_LINE_HEIGHT = 10
     private const val TOOLTIP_FONT_SCALE = 0.85f
+
+    const val TOOLTIP_MARGIN = 4
+    internal const val MIN_SAFE_MOVE_TOOLTIP_WIDTH = 40
+    internal const val MIN_SAFE_MOVE_TOOLTIP_HEIGHT = 24
+
+    internal fun resolveTooltipWidth(requestedWidth: Int, screenWidth: Int): Int? {
+        if (screenWidth < MIN_SAFE_MOVE_TOOLTIP_WIDTH + TOOLTIP_MARGIN * 2) return null
+        val maxAvailableWidth = screenWidth - TOOLTIP_MARGIN * 2
+        val resolved = ResponsiveGeometry.safeClampDimension(
+            value = requestedWidth,
+            preferredMin = MIN_SAFE_MOVE_TOOLTIP_WIDTH,
+            maxAllowed = maxAvailableWidth
+        )
+        return if (resolved >= MIN_SAFE_MOVE_TOOLTIP_WIDTH) resolved else null
+    }
+
+    internal fun resolveTooltipPosition(
+        tileX: Int,
+        tileY: Int,
+        tileW: Int,
+        tileH: Int,
+        tooltipWidth: Int,
+        totalHeight: Int,
+        screenWidth: Int,
+        screenHeight: Int
+    ): LayoutPoint {
+        val centeredX = tileX.toLong() + (tileW.toLong() / 2L) - (tooltipWidth.toLong() / 2L)
+        val px = ResponsiveGeometry.clampCoordWithMargin(
+            candidate = centeredX.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+            widgetSpan = tooltipWidth,
+            viewportSpan = screenWidth,
+            margin = TOOLTIP_MARGIN
+        )
+
+        val gap = 4
+        val preferredAbove = tileY.toLong() - totalHeight.toLong() - gap.toLong()
+        val fallbackBelow = tileY.toLong() + tileH.toLong() + gap.toLong()
+        val py = ResponsiveGeometry.resolvePlacementWithFallback(
+            preferredCoord = preferredAbove.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+            widgetSpan = totalHeight,
+            viewportSpan = screenHeight,
+            margin = TOOLTIP_MARGIN,
+            fallbackCoord = fallbackBelow.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
+        )
+
+        return LayoutPoint(px, py)
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Text colors
@@ -130,12 +179,17 @@ object MoveTooltipRenderer {
         val mc = MinecraftClient.getInstance()
         val screenWidth = mc.window.scaledWidth
         val screenHeight = mc.window.scaledHeight
+        if (screenWidth < MIN_SAFE_MOVE_TOOLTIP_WIDTH + TOOLTIP_MARGIN * 2 ||
+            screenHeight < MIN_SAFE_MOVE_TOOLTIP_HEIGHT + TOOLTIP_MARGIN * 2
+        ) return
+
         val tr = mc.textRenderer
         val fontScale = TOOLTIP_FONT_SCALE * PanelConfig.moveTooltipFontScale
         val lineH = (TOOLTIP_BASE_LINE_HEIGHT * fontScale).toInt().coerceAtLeast(7)
 
-        val tooltipWidth = (TOOLTIP_BASE_WIDTH * PanelConfig.moveTooltipFontScale).toInt()
-        val contentWidth = tooltipWidth - UIUtils.FRAME_INSET * 2
+        val requestedWidth = (TOOLTIP_BASE_WIDTH * PanelConfig.moveTooltipFontScale).toInt()
+        val tooltipWidth = resolveTooltipWidth(requestedWidth, screenWidth) ?: return
+        val contentWidth = (tooltipWidth - UIUtils.FRAME_INSET * 2).coerceAtLeast(0)
 
         // ── Compute data ──
         val data = computeMoveData(move)
@@ -184,11 +238,18 @@ object MoveTooltipRenderer {
             UIUtils.CELL_GAP + headTotalH + pairedCellH + descTotalH + effectTotalH + UIUtils.FRAME_INSET
 
         // ── Position above the move tile ──
-        var px = move.x.toInt() + (move.width / 2) - (tooltipWidth / 2)
-        var py = move.y.toInt() - totalHeight - 4
-        if (py < 4) py = move.y.toInt() + move.height + 4
-        px = px.coerceIn(4, screenWidth - tooltipWidth - 4)
-        py = py.coerceIn(4, screenHeight - totalHeight - 4)
+        val pos = resolveTooltipPosition(
+            tileX = move.x.toInt(),
+            tileY = move.y.toInt(),
+            tileW = move.width,
+            tileH = move.height,
+            tooltipWidth = tooltipWidth,
+            totalHeight = totalHeight,
+            screenWidth = screenWidth,
+            screenHeight = screenHeight
+        )
+        val px = pos.x
+        val py = pos.y
 
         // ── Render ──
         context.matrices.push()
@@ -227,11 +288,13 @@ object MoveTooltipRenderer {
         curY += powerCellH + UIUtils.CELL_GAP
 
         // Detail grid: odd → head full-width + paired rows; even → all paired
-        val leftColW = ((contentWidth - UIUtils.COL_GAP) * LEFT_COL_RATIO).toInt()
+        val availableColW = (contentWidth - UIUtils.COL_GAP).coerceAtLeast(0)
+        val leftColW = (availableColW * LEFT_COL_RATIO).toInt()
+        val rightColW = (availableColW - leftColW).coerceAtLeast(0)
         val geo = GridGeometry(
             leftCellX = cellX, leftCellW = leftColW,
             rightCellX = cellX + leftColW + UIUtils.COL_GAP,
-            rightCellW = contentWidth - UIUtils.COL_GAP - leftColW
+            rightCellW = rightColW
         )
 
         // Head item (first item, full-width when odd count)
@@ -594,7 +657,7 @@ object MoveTooltipRenderer {
         text: String, tooltipWidth: Int, fontScale: Float,
         tr: TextRenderer
     ): List<String> {
-        val maxWidth = tooltipWidth - UIUtils.FRAME_INSET * 2 - UIUtils.CELL_PAD * 2 - 2
+        val maxWidth = (tooltipWidth - UIUtils.FRAME_INSET * 2 - UIUtils.CELL_PAD * 2 - 2).coerceAtLeast(1)
         val words = text.split(" ")
         val lines = mutableListOf<String>()
         var currentLine = StringBuilder()

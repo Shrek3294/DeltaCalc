@@ -100,6 +100,13 @@ object CalcPanelState {
         height = nextHeight
     }
 
+    fun resetLayout() {
+        x = null
+        y = null
+        width = null
+        height = null
+    }
+
     fun toggleExpanded() {
         expanded = !expanded
     }

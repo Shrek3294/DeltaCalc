@@ -18,10 +18,16 @@ class ModMenuIntegration : ModMenuApi {
     }
 
     private fun createConfigScreen(parent: Screen): Screen {
+        var resetHudLayoutRequested = false
+
         val builder = ConfigBuilder.create()
             .setParentScreen(parent)
             .setTitle(Text.translatable("cobblemonextendedbattleui.config.title"))
             .setSavingRunnable {
+                if (resetHudLayoutRequested) {
+                    PanelConfig.resetHudLayout()
+                    CalcPanelState.resetLayout()
+                }
                 PanelConfig.save()
                 CalcPanelState.save()
             }
@@ -201,6 +207,20 @@ class ModMenuIntegration : ModMenuApi {
                 .setDefaultValue(false)
                 .setTooltip(Text.translatable("cobblemonextendedbattleui.config.debugDumpEnabled.tooltip"))
                 .setSaveConsumer { value -> PanelConfig.setDebugDumpEnabled(value) }
+                .build()
+        )
+
+        // Layout category
+        val layoutCategory = builder.getOrCreateCategory(Text.translatable("cobblemonextendedbattleui.config.category.layout"))
+
+        layoutCategory.addEntry(
+            entryBuilder.startBooleanToggle(
+                Text.translatable("cobblemonextendedbattleui.config.resetHudLayout"),
+                false
+            )
+                .setDefaultValue(false)
+                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.resetHudLayout.tooltip"))
+                .setSaveConsumer { value -> resetHudLayoutRequested = value }
                 .build()
         )
 

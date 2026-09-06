@@ -12,7 +12,8 @@ enum class CalcInvalidationReason {
     WEATHER_CHANGE,
     TERRAIN_CHANGE,
     SIDE_CONDITION_CHANGE,
-    PLAYER_MOVE_SELECTION_CHANGE
+    PLAYER_MOVE_SELECTION_CHANGE,
+    CALC_INPUT_CHANGE
 }
 
 class CalcInvalidationCoordinator {
@@ -30,28 +31,35 @@ class CalcInvalidationCoordinator {
             return false
         }
 
+        val transitionReasons = linkedSetOf<CalcInvalidationReason>()
+
         if (previous.playerActive?.displayName != snapshot.playerActive?.displayName ||
             previous.opponentActive?.displayName != snapshot.opponentActive?.displayName
-        ) pendingReasons += CalcInvalidationReason.ACTIVE_SWITCH
-        if (previous.selectedMoveName != snapshot.selectedMoveName) pendingReasons += CalcInvalidationReason.PLAYER_MOVE_SELECTION_CHANGE
-        if (previous.weather != snapshot.weather) pendingReasons += CalcInvalidationReason.WEATHER_CHANGE
-        if (previous.terrain != snapshot.terrain) pendingReasons += CalcInvalidationReason.TERRAIN_CHANGE
+        ) transitionReasons += CalcInvalidationReason.ACTIVE_SWITCH
+        if (previous.selectedMoveName != snapshot.selectedMoveName) transitionReasons += CalcInvalidationReason.PLAYER_MOVE_SELECTION_CHANGE
+        if (previous.weather != snapshot.weather) transitionReasons += CalcInvalidationReason.WEATHER_CHANGE
+        if (previous.terrain != snapshot.terrain) transitionReasons += CalcInvalidationReason.TERRAIN_CHANGE
         if (previous.playerSide.sideConditions != snapshot.playerSide.sideConditions ||
             previous.opponentSide.sideConditions != snapshot.opponentSide.sideConditions
-        ) pendingReasons += CalcInvalidationReason.SIDE_CONDITION_CHANGE
+        ) transitionReasons += CalcInvalidationReason.SIDE_CONDITION_CHANGE
         if (previous.playerActive?.currentHp != snapshot.playerActive?.currentHp ||
             previous.opponentActive?.currentHp != snapshot.opponentActive?.currentHp
-        ) pendingReasons += CalcInvalidationReason.HP_CHANGE
+        ) transitionReasons += CalcInvalidationReason.HP_CHANGE
         if (previous.playerActive?.status != snapshot.playerActive?.status ||
             previous.opponentActive?.status != snapshot.opponentActive?.status
-        ) pendingReasons += CalcInvalidationReason.STATUS_CHANGE
+        ) transitionReasons += CalcInvalidationReason.STATUS_CHANGE
         if (previous.playerActive?.statStages != snapshot.playerActive?.statStages ||
             previous.opponentActive?.statStages != snapshot.opponentActive?.statStages
-        ) pendingReasons += CalcInvalidationReason.STAT_STAGE_CHANGE
-        if (previous.opponentActive?.revealedMoves != snapshot.opponentActive?.revealedMoves) pendingReasons += CalcInvalidationReason.MOVE_REVEAL
-        if (previous.opponentActive?.itemName != snapshot.opponentActive?.itemName) pendingReasons += CalcInvalidationReason.ITEM_REVEAL
-        if (previous.opponentActive?.abilityName != snapshot.opponentActive?.abilityName) pendingReasons += CalcInvalidationReason.ABILITY_REVEAL
+        ) transitionReasons += CalcInvalidationReason.STAT_STAGE_CHANGE
+        if (previous.opponentActive?.revealedMoves != snapshot.opponentActive?.revealedMoves) transitionReasons += CalcInvalidationReason.MOVE_REVEAL
+        if (previous.opponentActive?.itemName != snapshot.opponentActive?.itemName) transitionReasons += CalcInvalidationReason.ITEM_REVEAL
+        if (previous.opponentActive?.abilityName != snapshot.opponentActive?.abilityName) transitionReasons += CalcInvalidationReason.ABILITY_REVEAL
 
+        if (transitionReasons.isEmpty()) {
+            transitionReasons += CalcInvalidationReason.CALC_INPUT_CHANGE
+        }
+
+        pendingReasons += transitionReasons
         previousSnapshot = snapshot
         return true
     }

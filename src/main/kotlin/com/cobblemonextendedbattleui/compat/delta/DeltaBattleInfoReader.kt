@@ -5,6 +5,7 @@ import com.cobblemon.mod.common.api.pokemon.stats.Stats
 import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.pokemon.FormData
 import com.cobblemonextendedbattleui.BattleStateTracker
+import com.cobblemonextendedbattleui.pokemon.SafeFormResolver
 import net.minecraft.client.MinecraftClient
 import net.minecraft.item.ItemStack
 import net.minecraft.text.Text
@@ -211,8 +212,8 @@ object DeltaBattleInfoReader {
 
                 for (candidate in aspectCandidates) {
                     if (candidate.isBlank()) continue
-                    val form = species.getForm(setOf(candidate))
-                    if (form != species.standardForm || candidate == species.standardForm.aspects.firstOrNull()) {
+                    val form = SafeFormResolver.safeGetForm(species, candidate, context = "DeltaBattleInfoReader.resolveFormData.named")
+                    if (form != null && (form != species.standardForm || candidate == species.standardForm.aspects.firstOrNull())) {
                         return@run form
                     }
                 }
@@ -221,8 +222,8 @@ object DeltaBattleInfoReader {
             return explicitForm ?: species.standardForm
         }
         if (aspects.isNotEmpty()) {
-            val aspectForm = species.getForm(aspects)
-            if (aspectForm != species.standardForm || aspects == species.standardForm.aspects) {
+            val aspectForm = SafeFormResolver.safeGetForm(species, aspects, context = "DeltaBattleInfoReader.resolveFormData.aspects")
+            if (aspectForm != null && (aspectForm != species.standardForm || aspects == species.standardForm.aspects)) {
                 return aspectForm
             }
         }
@@ -235,8 +236,8 @@ object DeltaBattleInfoReader {
 
         for (candidate in aspectCandidates) {
             if (candidate.isBlank()) continue
-            val form = species.getForm(setOf(candidate))
-            if (form != species.standardForm || candidate == species.standardForm.aspects.firstOrNull()) {
+            val form = SafeFormResolver.safeGetForm(species, candidate, context = "DeltaBattleInfoReader.resolveFormData.raw")
+            if (form != null && (form != species.standardForm || candidate == species.standardForm.aspects.firstOrNull())) {
                 return form
             }
         }

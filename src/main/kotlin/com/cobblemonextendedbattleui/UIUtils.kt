@@ -3,6 +3,7 @@ package com.cobblemonextendedbattleui
 import com.cobblemon.mod.common.api.types.ElementalType
 import com.cobblemon.mod.common.client.render.drawScaledText
 import com.cobblemonextendedbattleui.ui.shared.NineSliceRenderer
+import com.cobblemonextendedbattleui.ui.shared.ResponsiveGeometry
 import com.mojang.blaze3d.systems.RenderSystem
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
@@ -275,100 +276,31 @@ object UIUtils {
         screenWidth: Int,
         screenHeight: Int
     ): ResizeResult {
-        var newWidth = startWidth
-        var newHeight = startHeight
-        var newX = startX
-        var newY = startY
+        val modifiesLeft = zone == ResizeZone.LEFT || zone == ResizeZone.TOP_LEFT || zone == ResizeZone.BOTTOM_LEFT
+        val modifiesRight = zone == ResizeZone.RIGHT || zone == ResizeZone.TOP_RIGHT || zone == ResizeZone.BOTTOM_RIGHT
+        val modifiesTop = zone == ResizeZone.TOP || zone == ResizeZone.TOP_LEFT || zone == ResizeZone.TOP_RIGHT
+        val modifiesBottom = zone == ResizeZone.BOTTOM || zone == ResizeZone.BOTTOM_LEFT || zone == ResizeZone.BOTTOM_RIGHT
 
-        // Calculate the fixed edges (the edges that should NOT move during resize)
-        val fixedRight = startX + startWidth  // For left-side resizing
-        val fixedBottom = startY + startHeight  // For top-side resizing
-        val fixedLeft = startX  // For right-side resizing
-        val fixedTop = startY  // For bottom-side resizing
+        val result = ResponsiveGeometry.calculateResize(
+            startX = startX,
+            startY = startY,
+            startWidth = startWidth,
+            startHeight = startHeight,
+            deltaX = deltaX,
+            deltaY = deltaY,
+            modifiesLeft = modifiesLeft,
+            modifiesRight = modifiesRight,
+            modifiesTop = modifiesTop,
+            modifiesBottom = modifiesBottom,
+            minWidth = minWidth,
+            maxWidth = maxWidth,
+            minHeight = minHeight,
+            maxHeight = maxHeight,
+            viewportWidth = screenWidth,
+            viewportHeight = screenHeight
+        )
 
-        when (zone) {
-            ResizeZone.RIGHT -> {
-                // Right edge moves, left edge stays fixed
-                newWidth = (startWidth + deltaX).coerceIn(minWidth, maxWidth)
-                // Don't let it go past screen edge
-                val maxAllowedWidth = screenWidth - fixedLeft
-                newWidth = newWidth.coerceAtMost(maxAllowedWidth)
-            }
-            ResizeZone.BOTTOM -> {
-                // Bottom edge moves, top edge stays fixed
-                newHeight = (startHeight + deltaY).coerceIn(minHeight, maxHeight)
-                val maxAllowedHeight = screenHeight - fixedTop
-                newHeight = newHeight.coerceAtMost(maxAllowedHeight)
-            }
-            ResizeZone.BOTTOM_RIGHT -> {
-                newWidth = (startWidth + deltaX).coerceIn(minWidth, maxWidth)
-                newHeight = (startHeight + deltaY).coerceIn(minHeight, maxHeight)
-                val maxAllowedWidth = screenWidth - fixedLeft
-                val maxAllowedHeight = screenHeight - fixedTop
-                newWidth = newWidth.coerceAtMost(maxAllowedWidth)
-                newHeight = newHeight.coerceAtMost(maxAllowedHeight)
-            }
-            ResizeZone.LEFT -> {
-                // Left edge moves, right edge stays fixed
-                newWidth = (startWidth - deltaX).coerceIn(minWidth, maxWidth)
-                newX = fixedRight - newWidth
-                // Don't let left edge go past screen left
-                if (newX < 0) {
-                    newX = 0
-                    newWidth = fixedRight  // Can only be as wide as distance to right edge
-                    newWidth = newWidth.coerceIn(minWidth, maxWidth)
-                }
-            }
-            ResizeZone.TOP -> {
-                // Top edge moves, bottom edge stays fixed
-                newHeight = (startHeight - deltaY).coerceIn(minHeight, maxHeight)
-                newY = fixedBottom - newHeight
-                if (newY < 0) {
-                    newY = 0
-                    newHeight = fixedBottom
-                    newHeight = newHeight.coerceIn(minHeight, maxHeight)
-                }
-            }
-            ResizeZone.TOP_LEFT -> {
-                newWidth = (startWidth - deltaX).coerceIn(minWidth, maxWidth)
-                newHeight = (startHeight - deltaY).coerceIn(minHeight, maxHeight)
-                newX = fixedRight - newWidth
-                newY = fixedBottom - newHeight
-                if (newX < 0) {
-                    newX = 0
-                    newWidth = fixedRight.coerceIn(minWidth, maxWidth)
-                }
-                if (newY < 0) {
-                    newY = 0
-                    newHeight = fixedBottom.coerceIn(minHeight, maxHeight)
-                }
-            }
-            ResizeZone.TOP_RIGHT -> {
-                newWidth = (startWidth + deltaX).coerceIn(minWidth, maxWidth)
-                newHeight = (startHeight - deltaY).coerceIn(minHeight, maxHeight)
-                newY = fixedBottom - newHeight
-                val maxAllowedWidth = screenWidth - fixedLeft
-                newWidth = newWidth.coerceAtMost(maxAllowedWidth)
-                if (newY < 0) {
-                    newY = 0
-                    newHeight = fixedBottom.coerceIn(minHeight, maxHeight)
-                }
-            }
-            ResizeZone.BOTTOM_LEFT -> {
-                newWidth = (startWidth - deltaX).coerceIn(minWidth, maxWidth)
-                newHeight = (startHeight + deltaY).coerceIn(minHeight, maxHeight)
-                newX = fixedRight - newWidth
-                val maxAllowedHeight = screenHeight - fixedTop
-                newHeight = newHeight.coerceAtMost(maxAllowedHeight)
-                if (newX < 0) {
-                    newX = 0
-                    newWidth = fixedRight.coerceIn(minWidth, maxWidth)
-                }
-            }
-            ResizeZone.NONE -> {}
-        }
-
-        return ResizeResult(newX, newY, newWidth, newHeight)
+        return ResizeResult(result.x, result.y, result.width, result.height)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

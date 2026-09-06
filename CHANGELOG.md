@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.2.0
+
+- Responsive and reachable panels: dynamic geometry reconciliation keeps all panels, tooltips, popups, and battle log elements within bounds across window resizes and GUI scale changes without invalid clamp ranges or lost panels.
+- Guaranteed vs. likely outcomes and confidence warnings: structured damage calculations separate guaranteed KOs from likely KOs with distinct visual styles, left-edge confidence rails for lower confidence tiers, and visible de-duplicated warning chips for uncertain states.
+- Explicit calculator controls: override rows provide separate click targets for previous, next, and reset actions; section bands feature clear collapse/expand chevrons; and panel resize handles provide active hover feedback.
+- HUD layout reset and default lanes: adds a discoverable one-shot layout reset toggle under a dedicated Layout category in Mod Menu / Cloth Config settings that restores default geometry on Done; places the Battle Info Panel on the left edge and Damage Calculator on the right edge by default to avoid fresh-install overlap.
+- Stronger invalidation and form safety: battle snapshots use deterministic length-prefixed fingerprinting across all calculation-relevant fields (stats, weight, items, moves, tera types), and form resolution catches unexpected form exceptions with bounded, rate-limited diagnostics to avoid crashes or log spam.
+- Pure regression test suite: adds comprehensive JUnit tests for viewport bounds reconciliation, layout calculations, snapshot fingerprint collision resistance, coordinator invalidation rules, safe form diagnostic gates, and hardened version comparison.
+- Cross-namespace overlay mixin safety: dual-targets BattleOverlay render across development (named) and production (intermediary) runtimes without refmap dependency, resolving a startup crash during mixin application.
+
 ## 0.9.1.6-deltacalc
 
 - Mega-stone trump now swaps the holder's ability to the mega's intrinsic, on both sides. Charizardite Y → Drought, Charizardite X → Tough Claws, Gardevoirite → Pixilate, Mawilite → Huge Power, Mewtwonite X → Steadfast, Mewtwonite Y → Insomnia, etc. Hand-verified for all 47 Gen 6-7 megas. The DB doesn't carry abilities so the trump rule reads from a curated `MEGA_ABILITY_BY_FORM_KEY` map keyed by `<species>-mega(-x|-y)?`. Ability-conditional effects (Tough Claws on contact, Pixilate's Normal→Fairy + 1.2×, etc.) fire automatically as soon as the mega stone is detected. Opponent-side ability override still respects manual user-cycled overrides; player side always overrides since there's no manual-cycle mechanism for the player.

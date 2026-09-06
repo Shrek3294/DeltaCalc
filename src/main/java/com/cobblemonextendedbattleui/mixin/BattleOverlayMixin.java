@@ -21,7 +21,7 @@ public abstract class BattleOverlayMixin {
     @Shadow(remap = false)
     private BattleMessagePane messagePane;
 
-    @Inject(method = "method_1753", at = @At("HEAD"))
+    @Inject(method = {"render", "method_1753"}, at = @At("HEAD"), remap = false)
     private void updateBattleMessagePaneVisibility(DrawContext context, RenderTickCounter tickCounter, CallbackInfo ci) {
         if (messagePane != null) {
             messagePane.visible = !PanelConfig.INSTANCE.getEnableBattleLog();

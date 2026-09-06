@@ -4,6 +4,8 @@ import com.cobblemon.mod.common.client.render.drawScaledText
 import com.cobblemonextendedbattleui.PanelConfig
 import com.cobblemonextendedbattleui.UIUtils
 import com.cobblemonextendedbattleui.pokemon.tooltip.TooltipBoundsData
+import com.cobblemonextendedbattleui.ui.shared.LayoutPoint
+import com.cobblemonextendedbattleui.ui.shared.ResponsiveGeometry
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.text.Text
@@ -57,6 +59,7 @@ object TeamPanelRenderer {
         if (teamSize <= 0) return
 
         val (panelWidth, panelHeight) = calculatePanelDimensions(teamSize, modelSize, modelSpacing)
+        if (panelWidth < PANEL_CORNER * 2 || panelHeight < PANEL_CORNER * 2) return
 
         val panelX = x - PANEL_PADDING_H
         val panelY = y - PANEL_PADDING_V
@@ -111,6 +114,8 @@ object TeamPanelRenderer {
         if (teamSize <= 0) return
 
         val (panelWidth, panelHeight) = calculatePanelDimensions(teamSize, modelSize, modelSpacing)
+        if (panelWidth < PANEL_CORNER * 2 || panelHeight < PANEL_CORNER * 2) return
+
         val panelX = x - PANEL_PADDING_H
         val panelY = y - PANEL_PADDING_V
         val border = applyOpacity(PANEL_BORDER)
@@ -136,16 +141,23 @@ object TeamPanelRenderer {
         isLeftSide: Boolean,
         applyOpacity: (Int) -> Int
     ): TooltipBoundsData {
+        if (panelWidth < HELP_ICON_SIZE + HELP_ICON_MARGIN || panelHeight < HELP_ICON_SIZE + HELP_ICON_MARGIN) {
+            return TooltipBoundsData(0, 0, 0, 0)
+        }
+
         val mc = MinecraftClient.getInstance()
         val mouseX = (mc.mouse.x * mc.window.scaledWidth / mc.window.width).toInt()
         val mouseY = (mc.mouse.y * mc.window.scaledHeight / mc.window.height).toInt()
 
         val iconX = if (isLeftSide) {
-            panelX + panelWidth - HELP_ICON_SIZE - HELP_ICON_MARGIN
+            (panelX.toLong() + panelWidth.toLong() - HELP_ICON_SIZE.toLong() - HELP_ICON_MARGIN.toLong())
+                .coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
         } else {
-            panelX + HELP_ICON_MARGIN
+            (panelX.toLong() + HELP_ICON_MARGIN.toLong())
+                .coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
         }
-        val iconY = panelY + panelHeight - HELP_ICON_SIZE - HELP_ICON_MARGIN
+        val iconY = (panelY.toLong() + panelHeight.toLong() - HELP_ICON_SIZE.toLong() - HELP_ICON_MARGIN.toLong())
+            .coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
 
         val bounds = TooltipBoundsData(iconX, iconY, HELP_ICON_SIZE, HELP_ICON_SIZE)
 
@@ -204,6 +216,39 @@ object TeamPanelRenderer {
         return bounds
     }
 
+    internal fun resolveControlHintsPosition(
+        panelX: Int,
+        panelY: Int,
+        panelWidth: Int,
+        panelHeight: Int,
+        hintWidth: Int,
+        hintHeight: Int,
+        screenWidth: Int,
+        screenHeight: Int
+    ): LayoutPoint? {
+        if (screenWidth < hintWidth + 4 || screenHeight < hintHeight + 4) return null
+
+        val centeredX = panelX.toLong() + (panelWidth.toLong() / 2L) - (hintWidth.toLong() / 2L)
+        val hintX = ResponsiveGeometry.clampCoordWithMargin(
+            candidate = centeredX.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+            widgetSpan = hintWidth,
+            viewportSpan = screenWidth,
+            margin = 2
+        )
+
+        val preferredBelow = panelY.toLong() + panelHeight.toLong() + 2L
+        val fallbackAbove = panelY.toLong() - hintHeight.toLong() - 2L
+        val hintY = ResponsiveGeometry.resolvePlacementWithFallback(
+            preferredCoord = preferredBelow.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+            widgetSpan = hintHeight,
+            viewportSpan = screenHeight,
+            margin = 2,
+            fallbackCoord = fallbackAbove.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
+        )
+
+        return LayoutPoint(hintX, hintY)
+    }
+
     /**
      * Render control hints below the panel when hovering the help icon.
      */
@@ -239,13 +284,19 @@ object TeamPanelRenderer {
         val hintWidth = (textRenderer.getWidth(hintText) * hintScale).toInt() + 8
         val hintHeight = (textRenderer.fontHeight * hintScale).toInt() + 4
 
-        var hintX = panelBounds.x + (panelBounds.width / 2) - (hintWidth / 2)
-        var hintY = panelBounds.y + panelBounds.height + 2
+        val pos = resolveControlHintsPosition(
+            panelX = panelBounds.x,
+            panelY = panelBounds.y,
+            panelWidth = panelBounds.width,
+            panelHeight = panelBounds.height,
+            hintWidth = hintWidth,
+            hintHeight = hintHeight,
+            screenWidth = screenWidth,
+            screenHeight = screenHeight
+        ) ?: return
 
-        hintX = hintX.coerceIn(2, screenWidth - hintWidth - 2)
-        if (hintY + hintHeight > screenHeight - 2) {
-            hintY = panelBounds.y - hintHeight - 2
-        }
+        val hintX = pos.x
+        val hintY = pos.y
 
         val bgColor = color(15, 20, 25, 200)
         val borderColor = color(50, 60, 70, 200)

@@ -4,6 +4,8 @@ import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.battle.ClientBattleSide
 import com.cobblemonextendedbattleui.ui.panel.PanelContentRenderer
 import com.cobblemonextendedbattleui.ui.panel.PanelLayoutCalculator
+import com.cobblemonextendedbattleui.ui.shared.LayoutRect
+import com.cobblemonextendedbattleui.ui.shared.ResponsiveGeometry
 import com.cobblemonextendedbattleui.ui.shared.ScrollbarRenderer
 import com.cobblemonextendedbattleui.ui.shared.WidgetInteractionHandler
 import com.mojang.blaze3d.systems.RenderSystem
@@ -84,8 +86,8 @@ object BattleInfoPanel {
     private val ACCENT_FIELD = UIUtils.color(255, 200, 100, 255)
     private val HEADER_ACCENT = UIUtils.color(200, 165, 60, 180)
 
-    // Layout constants
     private const val BASE_PANEL_MARGIN = 10
+    internal const val MIN_SAFE_WIDTH = UIUtils.FRAME_INSET * 2 + 16
     private const val BASE_LINE_HEIGHT = 12
     private const val SCROLLBAR_WIDTH = 3
     private const val SECTION_LABEL_SCALE = 0.7f
@@ -206,25 +208,28 @@ object BattleInfoPanel {
     }
 
     private fun calculateThumbHeight(trackHeight: Int): Int {
-        val minThumb = (trackHeight / 4).coerceIn(6, 20)
-        return ((visibleContentHeight.toFloat() / contentHeight) * trackHeight).toInt()
-            .coerceIn(minThumb, trackHeight)
+        if (trackHeight <= 0 || contentHeight <= 0) return 0
+        val minThumb = minOf(trackHeight, (trackHeight / 4).coerceIn(6, 20))
+        val rawThumb = ((visibleContentHeight.toFloat() / contentHeight) * trackHeight).toInt()
+        return ResponsiveGeometry.safeClampDimension(rawThumb, minThumb, trackHeight)
     }
 
     private fun isOverScrollbarThumb(mouseX: Int, mouseY: Int): Boolean {
-        if (contentHeight <= visibleContentHeight) return false
+        if (contentHeight <= visibleContentHeight || visibleContentHeight <= 0) return false
 
         val scrollbarX = panelBoundsX + panelBoundsW - UIUtils.FRAME_INSET - SCROLLBAR_WIDTH
         val scrollbarY = headerEndY + UIUtils.CELL_GAP
         val scrollbarHeight = panelBoundsY + panelBoundsH - UIUtils.FRAME_INSET - scrollbarY
+        if (scrollbarHeight <= 0) return false
 
         if (mouseX < scrollbarX || mouseX > scrollbarX + SCROLLBAR_WIDTH) return false
         if (mouseY < scrollbarY || mouseY > scrollbarY + scrollbarHeight) return false
 
         val thumbHeight = calculateThumbHeight(scrollbarHeight)
-        val maxScroll = contentHeight - visibleContentHeight
+        if (thumbHeight <= 0) return false
+        val maxScroll = (contentHeight - visibleContentHeight).coerceAtLeast(0)
         val scrollRatio = if (maxScroll > 0) PanelConfig.scrollOffset.toFloat() / maxScroll else 0f
-        val thumbY = scrollbarY + ((scrollbarHeight - thumbHeight) * scrollRatio).toInt()
+        val thumbY = scrollbarY + ((scrollbarHeight - thumbHeight).coerceAtLeast(0) * scrollRatio).toInt()
 
         return mouseY >= thumbY && mouseY <= thumbY + thumbHeight
     }
@@ -279,14 +284,18 @@ object BattleInfoPanel {
                 }
                 interaction.isDraggingScrollbar -> {
                     val scrollbarHeight = panelBoundsY + panelBoundsH - UIUtils.FRAME_INSET - headerEndY - UIUtils.CELL_GAP
-                    val thumbHeight = calculateThumbHeight(scrollbarHeight)
-                    val trackHeight = scrollbarHeight - thumbHeight
+                    if (scrollbarHeight > 0) {
+                        val thumbHeight = calculateThumbHeight(scrollbarHeight)
+                        val trackHeight = scrollbarHeight - thumbHeight
 
-                    if (trackHeight > 0) {
-                        val deltaY = mouseY - interaction.scrollbarDragStartY
-                        val maxScroll = contentHeight - visibleContentHeight
-                        val scrollDelta = (deltaY.toFloat() / trackHeight * maxScroll).toInt()
-                        PanelConfig.scrollOffset = (interaction.scrollbarDragStartOffset + scrollDelta).coerceIn(0, maxScroll)
+                        if (trackHeight > 0) {
+                            val deltaY = mouseY - interaction.scrollbarDragStartY
+                            val maxScroll = (contentHeight - visibleContentHeight).coerceAtLeast(0)
+                            if (maxScroll > 0) {
+                                val scrollDelta = (deltaY.toFloat() / trackHeight * maxScroll).toInt()
+                                PanelConfig.scrollOffset = (interaction.scrollbarDragStartOffset + scrollDelta).coerceIn(0, maxScroll)
+                            }
+                        }
                     }
                 }
                 !wasMousePressed && canInteract && interaction.hoveredZone != UIUtils.ResizeZone.NONE -> {
@@ -311,6 +320,11 @@ object BattleInfoPanel {
                         PanelConfig.setCollapsedDimensions(result.newWidth, result.newHeight)
                     }
                     PanelConfig.setPosition(result.newX, result.newY)
+                    panelBoundsX = result.newX
+                    panelBoundsY = result.newY
+                    panelBoundsW = result.newWidth
+                    panelBoundsH = result.newHeight
+                    headerEndY = result.newY + UIUtils.FRAME_INSET + headerCellH
                 }
                 !wasMousePressed && canInteract && isOverHeader -> {
                     interaction.startDrag(mouseX, mouseY, panelBoundsX, panelBoundsY)
@@ -319,6 +333,9 @@ object BattleInfoPanel {
                     val pos = interaction.updateDrag(mouseX, mouseY, screenWidth, screenHeight, panelBoundsW, panelBoundsH)
                     if (pos != null) {
                         PanelConfig.setPosition(pos.first, pos.second)
+                        panelBoundsX = pos.first
+                        panelBoundsY = pos.second
+                        headerEndY = pos.second + UIUtils.FRAME_INSET + headerCellH
                     }
                 }
             }
@@ -391,13 +408,15 @@ object BattleInfoPanel {
         BattleStateTracker.checkBattleChanged(battle.battleId)
 
         val mc = MinecraftClient.getInstance()
-
-        if (!isMinimised) {
-            handleInput(mc)
-        }
-
         val screenWidth = mc.window.scaledWidth
         val screenHeight = mc.window.scaledHeight
+
+        if (screenWidth <= 0 || screenHeight <= 0) {
+            interaction.releaseAll()
+            wasMousePressed = false
+            return
+        }
+
         val playerUUID = mc.player?.uuid ?: return
 
         val playerInSide1 = battle.side1.actors.any { it.uuid == playerUUID }
@@ -478,47 +497,132 @@ object BattleInfoPanel {
 
         updateScaledValues()
 
-        val panelWidth: Int
-        val panelHeight: Int
+        // 1. Resolve width safely before width-dependent content measurement
+        val minWidth = PanelConfig.getMinWidth()
+        val maxWidth = minOf(screenWidth, PanelConfig.getMaxWidth(screenWidth))
+        val requestedWidth = (if (isExpanded) PanelConfig.panelWidth else PanelConfig.collapsedWidth) ?: PanelConfig.DEFAULT_WIDTH
+        val resolvedWidth = ResponsiveGeometry.safeClampDimension(
+            value = requestedWidth,
+            preferredMin = minWidth,
+            maxAllowed = maxWidth
+        )
 
-        if (isExpanded) {
-            panelWidth = PanelConfig.panelWidth ?: PanelConfig.DEFAULT_WIDTH
-            contentHeight = calculateExpandedContentHeight(allyPokemonData, opponentPokemonData, panelWidth)
-            val autoHeight = UIUtils.FRAME_INSET * 2 + headerCellH + UIUtils.CELL_GAP + contentHeight
-            panelHeight = PanelConfig.panelHeight ?: autoHeight
-        } else {
-            panelWidth = PanelConfig.collapsedWidth ?: PanelConfig.DEFAULT_WIDTH
-            contentHeight = calculateCollapsedContentHeight(allyPokemonData, opponentPokemonData, panelWidth)
-            val autoHeight = UIUtils.FRAME_INSET * 2 + headerCellH + UIUtils.CELL_GAP + contentHeight
-            panelHeight = PanelConfig.collapsedHeight ?: autoHeight
+        // Establish minimal safe width before content measurement
+        if (resolvedWidth < MIN_SAFE_WIDTH) {
+            interaction.releaseAll()
+            wasMousePressed = false
+            return
         }
 
-        val panelX = PanelConfig.panelX ?: (screenWidth - panelWidth - BASE_PANEL_MARGIN)
-        val panelY = PanelConfig.panelY ?: ((screenHeight - panelHeight) / 2)
+        // 2. Width-dependent content measurement
+        contentHeight = if (isExpanded) {
+            calculateExpandedContentHeight(allyPokemonData, opponentPokemonData, resolvedWidth)
+        } else {
+            calculateCollapsedContentHeight(allyPokemonData, opponentPokemonData, resolvedWidth)
+        }
+        val autoHeight = UIUtils.FRAME_INSET * 2 + headerCellH + UIUtils.CELL_GAP + contentHeight
+        val requestedHeight = (if (isExpanded) PanelConfig.panelHeight else PanelConfig.collapsedHeight) ?: autoHeight
 
-        val clampedX = panelX.coerceIn(0, (screenWidth - panelWidth).coerceAtLeast(0))
-        val clampedY = panelY.coerceIn(0, (screenHeight - panelHeight).coerceAtLeast(0))
+        // 3. Resolve height and x/y through ResponsiveGeometry
+        val bounds = reconcileBounds(
+            savedX = PanelConfig.panelX,
+            savedY = PanelConfig.panelY,
+            savedWidth = resolvedWidth,
+            savedHeight = requestedHeight,
+            autoHeight = autoHeight,
+            isExpanded = isExpanded,
+            screenWidth = screenWidth,
+            screenHeight = screenHeight
+        )
 
-        panelBoundsX = clampedX
-        panelBoundsY = clampedY
-        panelBoundsW = panelWidth
-        panelBoundsH = panelHeight
+        // 4. Safety check: minimally safe frame/header
+        val minHeaderHeight = UIUtils.FRAME_INSET * 2 + headerCellH
+        val expectedContentH = bounds.height - UIUtils.FRAME_INSET * 2 - headerCellH - UIUtils.CELL_GAP
+        val cannotSafelyRender = bounds.width < MIN_SAFE_WIDTH ||
+            bounds.height < minHeaderHeight ||
+            (isExpanded && expectedContentH <= 0)
 
-        // Visible content area: panel height minus frame insets, header cell, and gap
-        visibleContentHeight = panelHeight - UIUtils.FRAME_INSET * 2 - headerCellH - UIUtils.CELL_GAP
+        if (cannotSafelyRender) {
+            interaction.releaseAll()
+            wasMousePressed = false
+            return
+        }
+
+        panelBoundsX = bounds.x
+        panelBoundsY = bounds.y
+        panelBoundsW = bounds.width
+        panelBoundsH = bounds.height
+        headerEndY = bounds.y + UIUtils.FRAME_INSET + headerCellH
+
+        visibleContentHeight = (bounds.height - UIUtils.FRAME_INSET * 2 - headerCellH - UIUtils.CELL_GAP).coerceAtLeast(0)
 
         val maxScroll = (contentHeight - visibleContentHeight).coerceAtLeast(0)
         PanelConfig.scrollOffset = PanelConfig.scrollOffset.coerceIn(0, maxScroll)
 
+        // 5. Input handling with fresh reconciled bounds
+        if (!isMinimised) {
+            handleInput(mc)
+        }
+
+        val panelX = panelBoundsX
+        val panelY = panelBoundsY
+        val panelWidth = panelBoundsW
+        val panelHeight = panelBoundsH
+
         if (isExpanded) {
-            renderExpanded(context, clampedX, clampedY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData, playerSideName, opponentSideName)
+            renderExpanded(context, panelX, panelY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData, playerSideName, opponentSideName)
         } else {
-            renderCollapsed(context, clampedX, clampedY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData, playerSideName, opponentSideName)
+            renderCollapsed(context, panelX, panelY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData, playerSideName, opponentSideName)
         }
 
         if (!isMinimised) {
-            drawResizeHandles(context, clampedX, clampedY, panelWidth, panelHeight)
+            drawResizeHandles(context, panelX, panelY, panelWidth, panelHeight)
         }
+    }
+
+    internal fun reconcileBounds(
+        savedX: Int?,
+        savedY: Int?,
+        savedWidth: Int?,
+        savedHeight: Int?,
+        autoHeight: Int,
+        isExpanded: Boolean,
+        screenWidth: Int,
+        screenHeight: Int
+    ): LayoutRect {
+        if (screenWidth <= 0 || screenHeight <= 0) {
+            return LayoutRect(0, 0, 0, 0)
+        }
+
+        val minWidth = PanelConfig.getMinWidth()
+        val maxWidth = minOf(screenWidth, PanelConfig.getMaxWidth(screenWidth))
+        val requestedWidth = savedWidth ?: PanelConfig.DEFAULT_WIDTH
+        val resolvedWidth = ResponsiveGeometry.safeClampDimension(
+            value = requestedWidth,
+            preferredMin = minWidth,
+            maxAllowed = maxWidth
+        )
+
+        val minHeight = if (isExpanded) PanelConfig.getMinHeight() else PanelConfig.getMinCollapsedHeight()
+        val maxHeight = minOf(screenHeight, PanelConfig.getMaxHeight(screenHeight))
+        val requestedHeight = savedHeight ?: autoHeight
+
+        return ResponsiveGeometry.reconcile(
+            x = savedX,
+            y = savedY,
+            width = resolvedWidth,
+            height = requestedHeight,
+            viewportWidth = screenWidth,
+            viewportHeight = screenHeight,
+            defaultWidth = PanelConfig.DEFAULT_WIDTH,
+            defaultHeight = autoHeight,
+            minWidth = minWidth,
+            minHeight = minHeight,
+            maxWidth = maxWidth,
+            maxHeight = maxHeight,
+            defaultX = { _, _ -> BASE_PANEL_MARGIN },
+            defaultY = { h, vh -> (vh - h) / 2 }
+        )
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -537,8 +641,10 @@ object BattleInfoPanel {
 
     private fun renderHeader(context: DrawContext, x: Int, y: Int, width: Int) {
         val cellX = x + UIUtils.FRAME_INSET
-        val cellW = width - UIUtils.FRAME_INSET * 2
+        val cellW = (width - UIUtils.FRAME_INSET * 2).coerceAtLeast(0)
         val cellY = y + UIUtils.FRAME_INSET
+
+        if (cellW <= 0 || headerCellH <= 0) return
 
         UIUtils.drawPopupCell(context, cellX, cellY, cellW, headerCellH, colorTransform())
         headerEndY = cellY + headerCellH
@@ -582,20 +688,25 @@ object BattleInfoPanel {
         renderHeader(context, x, y, width)
 
         val cellX = x + UIUtils.FRAME_INSET
-        val cellW = width - UIUtils.FRAME_INSET * 2
+        val cellW = (width - UIUtils.FRAME_INSET * 2).coerceAtLeast(0)
         val contentCellY = headerEndY + UIUtils.CELL_GAP
-        val contentCellH = height - UIUtils.FRAME_INSET * 2 - headerCellH - UIUtils.CELL_GAP
+        val contentCellH = (height - UIUtils.FRAME_INSET * 2 - headerCellH - UIUtils.CELL_GAP).coerceAtLeast(0)
+
+        if (cellW <= 0 || contentCellH <= 0) return
 
         // Reserve scrollbar space
         val needsScrollbar = contentHeight > visibleContentHeight
         val scrollbarSpace = if (needsScrollbar) SCROLLBAR_WIDTH + 2 else 0
-        val effectiveW = cellW - scrollbarSpace
+        val effectiveW = (cellW - scrollbarSpace).coerceAtLeast(0)
+
+        if (effectiveW <= 0) return
 
         // Single cell fills ALL remaining space
         UIUtils.drawPopupCell(context, cellX, contentCellY, effectiveW, contentCellH, colorTransform())
 
         val contentX = cellX + UIUtils.CELL_PAD
-        val contentW = effectiveW - UIUtils.CELL_PAD * 2
+        val contentW = (effectiveW - UIUtils.CELL_PAD * 2).coerceAtLeast(0)
+        if (contentW <= 0) return
 
         enableScissor(cellX, contentCellY, effectiveW, contentCellH)
 
@@ -648,23 +759,29 @@ object BattleInfoPanel {
         renderHeader(context, x, y, width)
 
         val cellX = x + UIUtils.FRAME_INSET
-        val cellW = width - UIUtils.FRAME_INSET * 2
+        val cellW = (width - UIUtils.FRAME_INSET * 2).coerceAtLeast(0)
         val contentCellY = headerEndY + UIUtils.CELL_GAP
-        val contentCellH = height - UIUtils.FRAME_INSET * 2 - headerCellH - UIUtils.CELL_GAP
+        val contentCellH = (height - UIUtils.FRAME_INSET * 2 - headerCellH - UIUtils.CELL_GAP).coerceAtLeast(0)
+
+        if (cellW <= 0 || contentCellH <= 0) return
 
         val needsScrollbar = contentHeight > visibleContentHeight
         val scrollbarSpace = if (needsScrollbar) SCROLLBAR_WIDTH + 2 else 0
-        val effectiveW = cellW - scrollbarSpace
+        val effectiveW = (cellW - scrollbarSpace).coerceAtLeast(0)
+
+        if (effectiveW <= 0) return
 
         // Draw cell at FIXED position filling remaining space
         UIUtils.drawPopupCell(context, cellX, contentCellY, effectiveW, contentCellH, colorTransform())
+
+        val textX = cellX + UIUtils.CELL_PAD
+        val textW = (effectiveW - UIUtils.CELL_PAD * 2).coerceAtLeast(0)
+        if (textW <= 0) return
 
         enableScissor(cellX, contentCellY, effectiveW, contentCellH)
 
         // Content scrolls WITHIN the cell
         val startY = contentCellY + UIUtils.CELL_VPAD_TOP - PanelConfig.scrollOffset
-        val textX = cellX + UIUtils.CELL_PAD
-        val textW = effectiveW - UIUtils.CELL_PAD * 2
         renderCollapsedContent(context, textX, startY, textW, allyPokemonData, opponentPokemonData, playerSideName, opponentSideName)
 
         disableScissor()
@@ -751,6 +868,7 @@ object BattleInfoPanel {
     }
 
     private fun renderScrollbar(context: DrawContext, x: Int, y: Int, height: Int) {
+        if (height <= 0 || visibleContentHeight <= 0) return
         scrollbarRenderer.render(
             context, x, y, height,
             contentHeight, visibleContentHeight,

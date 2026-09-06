@@ -93,6 +93,9 @@ object CalcComputationService {
                 append(" | Rendered: ")
                 append(damageResult.opponentMoves.joinToString(", ") { it.moveName })
             }
+            val yourMoveRows = damageResult.yourMoves.map(::toRow)
+            val opponentMoveRows = damageResult.opponentMoves.map(::toRow)
+            val userWarningTexts = buildWarningTexts(damageResult.warnings, yourMoveRows, opponentMoveRows)
             currentModel = CalcRenderModel(
                 snapshot = snapshot,
                 selectedPlayerUuid = effectivePlayer?.uuid,
@@ -106,11 +109,12 @@ object CalcComputationService {
                 hazardNoteText = switchPreview.hazardNoteText,
                 isPreview = effectivePlayer?.uuid != snapshot.playerActiveUuid || selectedOpponent?.uuid != snapshot.opponentActiveUuid,
                 opponentSet = effectiveSet,
-                yourMoves = damageResult.yourMoves.map(::toRow),
-                opponentMoves = damageResult.opponentMoves.map(::toRow),
+                yourMoves = yourMoveRows,
+                opponentMoves = opponentMoveRows,
                 statusText = listOfNotNull(reasonText, warningText).joinToString(" | "),
                 speedText = buildSpeedText(effectivePlayer, effectiveOpponent, effectiveSet),
-                debugText = debugText
+                debugText = debugText,
+                warningTexts = userWarningTexts
             )
             lastSelectionFingerprint = selectionFingerprint
             currentModel?.let { DebugDumper.onComputation(it, damageResult) }
@@ -593,8 +597,9 @@ object CalcComputationService {
         return transformedOpponent to effectiveSet.copy(ability = nextAbility)
     }
 
-    private fun toRow(estimate: DamageEstimate): CalcMoveRow {
+    internal fun toRow(estimate: DamageEstimate): CalcMoveRow {
         val damageText = when {
+            estimate.outcome == CalcMoveOutcome.STATUS -> "--"
             !estimate.supported -> estimate.warnings.firstOrNull()?.lowercase() ?: "unsupported"
             estimate.minPercent != null && estimate.maxPercent != null -> buildString {
                 append(formatPercent(estimate.minPercent))
@@ -622,11 +627,33 @@ object CalcComputationService {
             moveName = estimate.moveName,
             damageText = damageText,
             koText = estimate.koLabel,
+            outcome = estimate.outcome,
             emphasized = estimate.emphasized,
             minPercent = estimate.minPercent,
             maxPercent = estimate.maxPercent,
-            isStatus = estimate.koLabel.equals("status", ignoreCase = true)
+            confidence = estimate.confidence,
+            warnings = estimate.warnings,
+            supported = estimate.supported
         )
+    }
+
+    internal fun buildWarningTexts(
+        damageResultWarnings: List<String>,
+        yourMoves: List<CalcMoveRow>,
+        opponentMoves: List<CalcMoveRow>
+    ): List<String> {
+        val list = mutableListOf<String>()
+        list.addAll(damageResultWarnings)
+        for (move in yourMoves) {
+            list.addAll(move.warnings)
+        }
+        for (move in opponentMoves) {
+            list.addAll(move.warnings)
+        }
+        return list.filter { text ->
+            val lower = text.lowercase()
+            !lower.startsWith("snapshot stable") && !lower.startsWith("recomputed")
+        }.distinct()
     }
 
     private fun formatPercent(value: Double): String {

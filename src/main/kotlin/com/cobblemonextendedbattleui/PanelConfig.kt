@@ -3,6 +3,7 @@ package com.cobblemonextendedbattleui
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.cobblemonextendedbattleui.ui.calc.CalcPanelState
+import com.cobblemonextendedbattleui.ui.shared.ResponsiveGeometry
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.MinecraftClient
 import java.io.File
@@ -331,22 +332,59 @@ object PanelConfig {
         panelY = y
     }
 
-    fun setDimensions(width: Int?, height: Int?) {
-        val mc = MinecraftClient.getInstance()
-        val screenWidth = mc.window.scaledWidth
-        val screenHeight = mc.window.scaledHeight
+    /**
+     * Resets stored panel/log layout bounds, positions, scroll offset, and custom
+     * team indicator positions to defaults.
+     * Preserves feature toggles, font/indicator scales, orientation, visibility, and debug options.
+     */
+    fun resetHudLayout() {
+        panelX = null
+        panelY = null
+        panelWidth = null
+        panelHeight = null
+        collapsedWidth = null
+        collapsedHeight = null
+        scrollOffset = 0
 
-        panelWidth = width?.coerceIn(getMinWidth(), getMaxWidth(screenWidth))
-        panelHeight = height?.coerceIn(getMinHeight(), getMaxHeight(screenHeight))
+        logX = null
+        logY = null
+        logWidth = null
+        logHeight = null
+
+        teamIndicatorLeftX = null
+        teamIndicatorLeftY = null
+        teamIndicatorRightX = null
+        teamIndicatorRightY = null
+    }
+
+    fun setDimensions(width: Int?, height: Int?) {
+        val window = runCatching { MinecraftClient.getInstance().window }.getOrNull()
+        val screenWidth = window?.scaledWidth
+        val screenHeight = window?.scaledHeight
+        clampAndSetDimensions(width, height, screenWidth, screenHeight)
+    }
+
+    internal fun clampAndSetDimensions(width: Int?, height: Int?, screenWidth: Int?, screenHeight: Int?) {
+        val maxAllowedW = screenWidth?.let { getMaxWidth(it) } ?: Int.MAX_VALUE
+        val maxAllowedH = screenHeight?.let { getMaxHeight(it) } ?: Int.MAX_VALUE
+
+        panelWidth = width?.let { ResponsiveGeometry.safeClampDimension(it, getMinWidth(), maxAllowedW) }
+        panelHeight = height?.let { ResponsiveGeometry.safeClampDimension(it, getMinHeight(), maxAllowedH) }
     }
 
     fun setCollapsedDimensions(width: Int?, height: Int?) {
-        val mc = MinecraftClient.getInstance()
-        val screenWidth = mc.window.scaledWidth
-        val screenHeight = mc.window.scaledHeight
+        val window = runCatching { MinecraftClient.getInstance().window }.getOrNull()
+        val screenWidth = window?.scaledWidth
+        val screenHeight = window?.scaledHeight
+        clampAndSetCollapsedDimensions(width, height, screenWidth, screenHeight)
+    }
 
-        collapsedWidth = width?.coerceIn(getMinWidth(), getMaxWidth(screenWidth))
-        collapsedHeight = height?.coerceIn(getMinCollapsedHeight(), getMaxHeight(screenHeight))
+    internal fun clampAndSetCollapsedDimensions(width: Int?, height: Int?, screenWidth: Int?, screenHeight: Int?) {
+        val maxAllowedW = screenWidth?.let { getMaxWidth(it) } ?: Int.MAX_VALUE
+        val maxAllowedH = screenHeight?.let { getMaxHeight(it) } ?: Int.MAX_VALUE
+
+        collapsedWidth = width?.let { ResponsiveGeometry.safeClampDimension(it, getMinWidth(), maxAllowedW) }
+        collapsedHeight = height?.let { ResponsiveGeometry.safeClampDimension(it, getMinCollapsedHeight(), maxAllowedH) }
     }
 
     fun getMinCollapsedHeight(): Int = 40  // Smaller minimum for collapsed
@@ -381,8 +419,18 @@ object PanelConfig {
     }
 
     fun setLogDimensions(width: Int?, height: Int?) {
-        logWidth = width?.coerceIn(MIN_LOG_WIDTH, MAX_LOG_WIDTH)
-        logHeight = height?.coerceIn(MIN_LOG_HEIGHT, MAX_LOG_HEIGHT)
+        val window = runCatching { MinecraftClient.getInstance().window }.getOrNull()
+        val screenWidth = window?.scaledWidth
+        val screenHeight = window?.scaledHeight
+        clampAndSetLogDimensions(width, height, screenWidth, screenHeight)
+    }
+
+    internal fun clampAndSetLogDimensions(width: Int?, height: Int?, screenWidth: Int?, screenHeight: Int?) {
+        val maxAllowedW = screenWidth?.let { minOf(it, MAX_LOG_WIDTH) } ?: MAX_LOG_WIDTH
+        val maxAllowedH = screenHeight?.let { minOf(it, MAX_LOG_HEIGHT) } ?: MAX_LOG_HEIGHT
+
+        logWidth = width?.let { ResponsiveGeometry.safeClampDimension(it, MIN_LOG_WIDTH, maxAllowedW) }
+        logHeight = height?.let { ResponsiveGeometry.safeClampDimension(it, MIN_LOG_HEIGHT, maxAllowedH) }
     }
 
     fun adjustLogFontScale(delta: Float) {

@@ -4,6 +4,7 @@
 build/
 run/
 out/
+/logs/
 
 # IDE and OS
 .idea/

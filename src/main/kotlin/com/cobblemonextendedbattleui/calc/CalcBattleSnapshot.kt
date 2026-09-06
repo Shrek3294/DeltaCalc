@@ -89,21 +89,26 @@ data class CalcBattleSnapshot(
     val selectedMoveName: String?,
     val compatNotes: List<String>
 ) {
-    fun fingerprint(): String = listOf(
-        battleId.toString(),
-        turn.toString(),
-        weather.orEmpty(),
-        terrain.orEmpty(),
-        playerSide.sideConditions.entries.sortedBy { it.key }.joinToString("|") { "${it.key}:${it.value}" },
-        opponentSide.sideConditions.entries.sortedBy { it.key }.joinToString("|") { "${it.key}:${it.value}" },
-        playerActiveUuid?.toString().orEmpty(),
-        opponentActiveUuid?.toString().orEmpty(),
-        playerTeam.joinToString("|") { it.fingerprintPart() },
-        opponentTeam.joinToString("|") { it.fingerprintPart() },
-        playerActive.fingerprintPart(),
-        opponentActive.fingerprintPart(),
-        selectedMoveName.orEmpty()
-    ).joinToString("::")
+    fun fingerprint(): String {
+        val sb = StringBuilder()
+        sb.append("14:[")
+        sb.append(CalcSnapshotEncoder.encodeToken(battleId.toString()))
+        sb.append(CalcSnapshotEncoder.encodeToken(turn.toString()))
+        sb.append(CalcSnapshotEncoder.encodeToken(weather))
+        sb.append(CalcSnapshotEncoder.encodeToken(terrain))
+        sb.append(CalcSnapshotEncoder.encodeMap(playerSide.sideConditions))
+        sb.append(CalcSnapshotEncoder.encodeMap(opponentSide.sideConditions))
+        sb.append(CalcSnapshotEncoder.encodeToken(playerActiveUuid?.toString()))
+        sb.append(CalcSnapshotEncoder.encodeToken(opponentActiveUuid?.toString()))
+        sb.append(CalcSnapshotEncoder.encodePokemonList(playerTeam))
+        sb.append(CalcSnapshotEncoder.encodePokemonList(opponentTeam))
+        sb.append(CalcSnapshotEncoder.encodeToken(playerActive.fingerprintPart()))
+        sb.append(CalcSnapshotEncoder.encodeToken(opponentActive.fingerprintPart()))
+        sb.append(CalcSnapshotEncoder.encodeToken(selectedMoveName))
+        sb.append(CalcSnapshotEncoder.encodeList(compatNotes))
+        sb.append("]")
+        return sb.toString()
+    }
 
     fun findPlayer(uuid: UUID?): CalcPokemonSnapshot? = playerTeam.firstOrNull { it.uuid == uuid }
 
@@ -149,6 +154,22 @@ data class EffectiveBattleSet(
     val abilityUsagePercent: Map<String, Double> = emptyMap()
 )
 
+enum class CalcMoveOutcome {
+    GUARANTEED_OHKO,
+    LIKELY_OHKO,
+    TWO_HKO,
+    THREE_HKO,
+    FOUR_HKO_PLUS,
+    KO,
+    IMMUNE,
+    STATUS,
+    UNSUPPORTED;
+
+    val isOhko: Boolean get() = this == GUARANTEED_OHKO || this == LIKELY_OHKO
+    val isGuaranteedOhko: Boolean get() = this == GUARANTEED_OHKO
+    val isLikelyOhko: Boolean get() = this == LIKELY_OHKO
+}
+
 enum class DamageConfidence {
     HIGH,
     MEDIUM,
@@ -174,7 +195,8 @@ data class DamageEstimate(
     val damageRolls: List<Int> = emptyList(),
     val critDamageRolls: List<Int> = emptyList(),
     val minHits: Int = 1,
-    val maxHits: Int = 1
+    val maxHits: Int = 1,
+    val outcome: CalcMoveOutcome
 )
 
 data class DamageComputationResult(
@@ -187,11 +209,16 @@ data class CalcMoveRow(
     val moveName: String,
     val damageText: String,
     val koText: String,
+    val outcome: CalcMoveOutcome,
     val emphasized: Boolean = false,
     val minPercent: Double? = null,
     val maxPercent: Double? = null,
-    val isStatus: Boolean = false
-)
+    val confidence: DamageConfidence = DamageConfidence.HIGH,
+    val warnings: List<String> = emptyList(),
+    val supported: Boolean = true
+) {
+    val isStatus: Boolean get() = outcome == CalcMoveOutcome.STATUS
+}
 
 data class CalcPreviewTab(
     val uuid: UUID,
@@ -218,30 +245,105 @@ data class CalcRenderModel(
     val opponentMoves: List<CalcMoveRow>,
     val statusText: String,
     val speedText: String? = null,
-    val debugText: String = ""
+    val debugText: String = "",
+    val warningTexts: List<String> = emptyList()
 )
 
-private fun CalcPokemonSnapshot?.fingerprintPart(): String {
-    if (this == null) return ""
-    return listOf(
-        uuid.toString(),
-        displayName,
-        speciesId.orEmpty(),
-        speciesKey.orEmpty(),
-        speciesLabel,
-        formName.orEmpty(),
-        level.toString(),
-        currentHp.toString(),
-        maxHp.toString(),
-        exactHpValues.toString(),
-        status.orEmpty(),
-        itemName.orEmpty(),
-        abilityName.orEmpty(),
-        typeNames.joinToString("|"),
-        revealedMoves.joinToString("|"),
-        moveList.joinToString("|") { "${it.id}:${it.displayName}" },
-        statStages.entries.sortedBy { it.key }.joinToString("|") { "${it.key}:${it.value}" }
-    ).joinToString("::")
+internal fun CalcPokemonSnapshot?.fingerprintPart(): String {
+    if (this == null) return "-1:"
+    val sb = StringBuilder()
+    sb.append("22:[")
+    sb.append(CalcSnapshotEncoder.encodeToken(uuid.toString()))
+    sb.append(CalcSnapshotEncoder.encodeToken(displayName))
+    sb.append(CalcSnapshotEncoder.encodeToken(speciesId))
+    sb.append(CalcSnapshotEncoder.encodeToken(speciesKey))
+    sb.append(CalcSnapshotEncoder.encodeToken(speciesLabel))
+    sb.append(CalcSnapshotEncoder.encodeToken(formName))
+    sb.append(CalcSnapshotEncoder.encodeToken(level.toString()))
+    sb.append(CalcSnapshotEncoder.encodeToken(currentHp.toString()))
+    sb.append(CalcSnapshotEncoder.encodeToken(maxHp.toString()))
+    sb.append(CalcSnapshotEncoder.encodeToken(exactHpValues.toString()))
+    sb.append(CalcSnapshotEncoder.encodeToken(status))
+    sb.append(CalcSnapshotEncoder.encodeToken(itemName))
+    sb.append(CalcSnapshotEncoder.encodeToken(abilityName))
+    sb.append(CalcSnapshotEncoder.encodeList(typeNames))
+    sb.append(CalcSnapshotEncoder.encodeList(revealedMoves))
+    sb.append(CalcSnapshotEncoder.encodeMoveRefs(moveList))
+    sb.append(CalcSnapshotEncoder.encodeMap(statStages))
+    sb.append(CalcSnapshotEncoder.encodeToken(teraType))
+    sb.append(CalcSnapshotEncoder.encodeStats(baseStats))
+    sb.append(CalcSnapshotEncoder.encodeStats(actualStats))
+    sb.append(CalcSnapshotEncoder.encodeToken(canEvolve.toString()))
+    sb.append(CalcSnapshotEncoder.encodeDouble(weightKg))
+    sb.append("]")
+    return sb.toString()
+}
+
+internal object CalcSnapshotEncoder {
+    fun encodeToken(token: String?): String {
+        return if (token == null) "-1:" else "${token.length}:$token"
+    }
+
+    fun encodeList(items: List<String>): String {
+        val sb = StringBuilder()
+        sb.append(items.size).append(":[")
+        for (item in items) {
+            sb.append(encodeToken(item))
+        }
+        sb.append("]")
+        return sb.toString()
+    }
+
+    fun encodeMap(map: Map<String, Int>): String {
+        val sorted = map.entries.sortedBy { it.key }
+        val sb = StringBuilder()
+        sb.append(sorted.size).append(":[")
+        for (entry in sorted) {
+            sb.append(encodeToken(entry.key))
+            sb.append(encodeToken(entry.value.toString()))
+        }
+        sb.append("]")
+        return sb.toString()
+    }
+
+    fun encodeMoveRefs(moves: List<CalcMoveRef>): String {
+        val sb = StringBuilder()
+        sb.append(moves.size).append(":[")
+        for (m in moves) {
+            sb.append(encodeToken(m.id))
+            sb.append(encodeToken(m.displayName))
+        }
+        sb.append("]")
+        return sb.toString()
+    }
+
+    fun encodeStats(stats: CalcStats?): String {
+        if (stats == null) return encodeToken(null)
+        val sb = StringBuilder()
+        sb.append("6:[")
+        sb.append(encodeToken(stats.hp.toString()))
+        sb.append(encodeToken(stats.atk.toString()))
+        sb.append(encodeToken(stats.def.toString()))
+        sb.append(encodeToken(stats.spa.toString()))
+        sb.append(encodeToken(stats.spd.toString()))
+        sb.append(encodeToken(stats.spe.toString()))
+        sb.append("]")
+        return sb.toString()
+    }
+
+    fun encodeDouble(value: Double?): String {
+        return if (value == null) encodeToken(null) else encodeToken(value.toBits().toString())
+    }
+
+    fun encodePokemonList(pokemon: List<CalcPokemonSnapshot>): String {
+        val sb = StringBuilder()
+        sb.append(pokemon.size).append(":[")
+        for (p in pokemon) {
+            sb.append(encodeToken(p.fingerprintPart()))
+        }
+        sb.append("]")
+        return sb.toString()
+    }
 }
 
 internal fun normalizeToken(value: String?): String {

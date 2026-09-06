@@ -7,6 +7,8 @@ import com.cobblemonextendedbattleui.pokemon.tooltip.MoveInfo
 import com.cobblemonextendedbattleui.pokemon.tooltip.PokeballBounds
 import com.cobblemonextendedbattleui.pokemon.tooltip.TooltipBoundsData
 import com.cobblemonextendedbattleui.pokemon.tooltip.TooltipData
+import com.cobblemonextendedbattleui.ui.shared.LayoutPoint
+import com.cobblemonextendedbattleui.ui.shared.ResponsiveGeometry
 import com.mojang.blaze3d.systems.RenderSystem
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
@@ -34,6 +36,83 @@ object PokemonInfoPopup {
     private const val POPUP_BASE_WIDTH = 240
     private const val LEFT_COL_RATIO = 0.50f
     private val LABEL_COLOR = UIUtils.color(120, 140, 170)
+
+    const val POPUP_MARGIN = 4
+    internal const val MIN_SAFE_POPUP_WIDTH = 40
+    internal const val MIN_SAFE_POPUP_HEIGHT = 24
+
+    internal fun resolvePopupWidth(requestedWidth: Int, screenWidth: Int): Int? {
+        if (screenWidth < MIN_SAFE_POPUP_WIDTH + POPUP_MARGIN * 2) return null
+        val maxAvailableWidth = screenWidth - POPUP_MARGIN * 2
+        val resolved = ResponsiveGeometry.safeClampDimension(
+            value = requestedWidth,
+            preferredMin = MIN_SAFE_POPUP_WIDTH,
+            maxAllowed = maxAvailableWidth
+        )
+        return if (resolved >= MIN_SAFE_POPUP_WIDTH) resolved else null
+    }
+
+    internal fun resolvePopupPosition(
+        bounds: PokeballBounds,
+        popupWidth: Int,
+        totalHeight: Int,
+        screenWidth: Int,
+        screenHeight: Int,
+        isVertical: Boolean
+    ): LayoutPoint {
+        val px: Int
+        val py: Int
+
+        if (isVertical) {
+            val gap = 4
+            val preferredX: Long
+            val fallbackX: Long
+            if (bounds.isLeftSide) {
+                preferredX = bounds.x.toLong() + bounds.width.toLong() + gap.toLong()
+                fallbackX = bounds.x.toLong() - popupWidth.toLong() - gap.toLong()
+            } else {
+                preferredX = bounds.x.toLong() - popupWidth.toLong() - gap.toLong()
+                fallbackX = bounds.x.toLong() + bounds.width.toLong() + gap.toLong()
+            }
+
+            px = ResponsiveGeometry.resolvePlacementWithFallback(
+                preferredCoord = preferredX.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+                widgetSpan = popupWidth,
+                viewportSpan = screenWidth,
+                margin = POPUP_MARGIN,
+                fallbackCoord = fallbackX.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
+            )
+
+            val centeredY = bounds.y.toLong() + (bounds.height.toLong() / 2L) - (totalHeight.toLong() / 2L)
+            py = ResponsiveGeometry.clampCoordWithMargin(
+                candidate = centeredY.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+                widgetSpan = totalHeight,
+                viewportSpan = screenHeight,
+                margin = POPUP_MARGIN
+            )
+        } else {
+            val centeredX = bounds.x.toLong() + (bounds.width.toLong() / 2L) - (popupWidth.toLong() / 2L)
+            px = ResponsiveGeometry.clampCoordWithMargin(
+                candidate = centeredX.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+                widgetSpan = popupWidth,
+                viewportSpan = screenWidth,
+                margin = POPUP_MARGIN
+            )
+
+            val gap = 4
+            val preferredBelow = bounds.y.toLong() + bounds.height.toLong() + gap.toLong()
+            val fallbackAbove = bounds.y.toLong() - totalHeight.toLong() - gap.toLong()
+            py = ResponsiveGeometry.resolvePlacementWithFallback(
+                preferredCoord = preferredBelow.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+                widgetSpan = totalHeight,
+                viewportSpan = screenHeight,
+                margin = POPUP_MARGIN,
+                fallbackCoord = fallbackAbove.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
+            )
+        }
+
+        return LayoutPoint(px, py)
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Stat-specific colors
@@ -70,15 +149,24 @@ object PokemonInfoPopup {
         screenWidth: Int,
         screenHeight: Int,
         isMinimised: Boolean
-    ): TooltipBoundsData {
+    ): TooltipBoundsData? {
+        if (screenWidth < MIN_SAFE_POPUP_WIDTH + POPUP_MARGIN * 2 ||
+            screenHeight < MIN_SAFE_POPUP_HEIGHT + POPUP_MARGIN * 2
+        ) {
+            return null
+        }
+
         val tr = MinecraftClient.getInstance().textRenderer
         val fontScale = TeamIndicatorUI.TOOLTIP_FONT_SCALE * PanelConfig.tooltipFontScale
         val lineH = (TeamIndicatorUI.TOOLTIP_BASE_LINE_HEIGHT * fontScale).toInt().coerceAtLeast(7)
 
-        val popupWidth = (POPUP_BASE_WIDTH * PanelConfig.tooltipFontScale).toInt()
-        val contentWidth = popupWidth - UIUtils.FRAME_INSET * 2
-        val leftCellW = ((contentWidth - UIUtils.COL_GAP) * LEFT_COL_RATIO).toInt()
-        val rightCellW = contentWidth - UIUtils.COL_GAP - leftCellW
+        val requestedWidth = (POPUP_BASE_WIDTH * PanelConfig.tooltipFontScale).toInt()
+        val popupWidth = resolvePopupWidth(requestedWidth, screenWidth) ?: return null
+
+        val contentWidth = (popupWidth - UIUtils.FRAME_INSET * 2).coerceAtLeast(0)
+        val availableColW = (contentWidth - UIUtils.COL_GAP).coerceAtLeast(0)
+        val leftCellW = (availableColW * LEFT_COL_RATIO).toInt()
+        val rightCellW = (availableColW - leftCellW).coerceAtLeast(0)
 
         // ── Calculate layout ──
         val layout = calculateLayout(data, lineH)
@@ -87,31 +175,9 @@ object PokemonInfoPopup {
 
         // ── Position popup ──
         val isVertical = PanelConfig.teamIndicatorOrientation == PanelConfig.TeamIndicatorOrientation.VERTICAL
-        var px: Int
-        var py: Int
-
-        if (isVertical) {
-            // Vertical team layout: popup appears to the side of the pokeball
-            val gap = 4
-            px = if (bounds.isLeftSide) {
-                bounds.x + bounds.width + gap  // Right of left-side team
-            } else {
-                bounds.x - popupWidth - gap    // Left of right-side team
-            }
-            // Vertically centered on the hovered pokeball, clamped to screen
-            py = bounds.y + (bounds.height / 2) - (totalHeight / 2)
-            px = px.coerceIn(4, screenWidth - popupWidth - 4)
-            py = py.coerceIn(4, screenHeight - totalHeight - 4)
-        } else {
-            // Horizontal team layout: popup appears below the pokeball
-            px = bounds.x + (bounds.width / 2) - (popupWidth / 2)
-            py = bounds.y + bounds.height + 4
-            px = px.coerceIn(4, screenWidth - popupWidth - 4)
-            if (py + totalHeight > screenHeight - 4) {
-                py = bounds.y - totalHeight - 4
-            }
-            py = py.coerceAtLeast(4)
-        }
+        val pos = resolvePopupPosition(bounds, popupWidth, totalHeight, screenWidth, screenHeight, isVertical)
+        val px = pos.x
+        val py = pos.y
 
         val opacity = if (isMinimised) UIUtils.MINIMISED_OPACITY else 1f
 

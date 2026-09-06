@@ -347,7 +347,7 @@ object BestEffortDamageEngine : DamageEngine {
 
         val category = effectiveCategory(template, attacker, defender)
         if (category == DamageCategories.STATUS) {
-            return unsupportedEstimate(resolvedDisplayName, "Status move", guessed, emphasize)
+            return statusEstimate(resolvedDisplayName, guessed, emphasize)
         }
 
         val moveTypeName = resolveMoveTypeName(template, attacker, context)
@@ -366,6 +366,7 @@ object BestEffortDamageEngine : DamageEngine {
         val defenderAtFullHp = defenderMaxHp > 0 && defenderCurrentHp >= defenderMaxHp
 
         fixedDamageOverride(template, attacker, defender, defenderMaxHp)?.let { fixed ->
+            val fixedOutcome = outcomeFor(defenderCurrentHp, fixed, fixed)
             val fixedKoLabel = koLabel(defenderCurrentHp, fixed, fixed)
             return DamageEstimate(
                 moveId = moveId,
@@ -377,7 +378,8 @@ object BestEffortDamageEngine : DamageEngine {
                 koLabel = fixedKoLabel,
                 confidence = confidenceFor(attacker, defender, guessed, warnings, blockingIssues, fixedKoLabel),
                 warnings = warnings,
-                emphasized = emphasize
+                emphasized = emphasize,
+                outcome = fixedOutcome
             )
         }
 
@@ -425,7 +427,8 @@ object BestEffortDamageEngine : DamageEngine {
                 koLabel = "Immune",
                 confidence = confidenceFor(attacker, defender, guessed, warnings, blockingIssues, "Immune"),
                 warnings = warnings,
-                emphasized = emphasize
+                emphasized = emphasize,
+                outcome = CalcMoveOutcome.IMMUNE
             )
         }
 
@@ -506,6 +509,7 @@ object BestEffortDamageEngine : DamageEngine {
 
         val minPercent = damagePercent(minDamage, defenderMaxHp)
         val maxPercent = damagePercent(maxDamage, defenderMaxHp)
+        val outcome = outcomeFor(defenderCurrentHp, minDamage, maxDamage)
         val koLabel = koLabel(defenderCurrentHp, minDamage, maxDamage)
 
         return DamageEstimate(
@@ -526,7 +530,8 @@ object BestEffortDamageEngine : DamageEngine {
             damageRolls = damageRolls,
             critDamageRolls = critDamageRolls,
             minHits = minHits,
-            maxHits = maxHits
+            maxHits = maxHits,
+            outcome = outcome
         )
     }
 
@@ -1167,13 +1172,30 @@ object BestEffortDamageEngine : DamageEngine {
         return (maxHp * combatant.snapshot.currentHp / 100.0).toInt().coerceIn(0, maxHp)
     }
 
-    private fun koLabel(currentHp: Int, minDamage: Int, maxDamage: Int): String {
-        if (currentHp <= 0) return "KO"
-        if (minDamage >= currentHp) return "OHKO"
-        if (maxDamage >= currentHp) return "Likely OHKO"
-        if (maxDamage * 2 >= currentHp) return "2HKO"
-        if (maxDamage * 3 >= currentHp) return "3HKO"
-        return "4HKO+"
+    internal fun outcomeFor(currentHp: Int, minDamage: Int, maxDamage: Int): CalcMoveOutcome {
+        if (currentHp <= 0) return CalcMoveOutcome.KO
+        val hpL = currentHp.toLong()
+        val minDmgL = minDamage.toLong()
+        val maxDmgL = maxDamage.toLong()
+        if (minDmgL >= hpL) return CalcMoveOutcome.GUARANTEED_OHKO
+        if (maxDmgL >= hpL) return CalcMoveOutcome.LIKELY_OHKO
+        if (maxDmgL * 2L >= hpL) return CalcMoveOutcome.TWO_HKO
+        if (maxDmgL * 3L >= hpL) return CalcMoveOutcome.THREE_HKO
+        return CalcMoveOutcome.FOUR_HKO_PLUS
+    }
+
+    internal fun koLabel(currentHp: Int, minDamage: Int, maxDamage: Int): String {
+        return when (outcomeFor(currentHp, minDamage, maxDamage)) {
+            CalcMoveOutcome.KO -> "KO"
+            CalcMoveOutcome.GUARANTEED_OHKO -> "OHKO"
+            CalcMoveOutcome.LIKELY_OHKO -> "Likely OHKO"
+            CalcMoveOutcome.TWO_HKO -> "2HKO"
+            CalcMoveOutcome.THREE_HKO -> "3HKO"
+            CalcMoveOutcome.FOUR_HKO_PLUS -> "4HKO+"
+            CalcMoveOutcome.IMMUNE -> "Immune"
+            CalcMoveOutcome.STATUS -> "Status"
+            CalcMoveOutcome.UNSUPPORTED -> "--"
+        }
     }
 
     private fun confidenceFor(
@@ -1196,7 +1218,29 @@ object BestEffortDamageEngine : DamageEngine {
         }
     }
 
-    private fun unsupportedEstimate(
+    internal fun statusEstimate(
+        moveName: String,
+        guessed: Boolean = false,
+        emphasized: Boolean = false
+    ): DamageEstimate {
+        val warnings = if (guessed) listOf("Guessed opponent move") else emptyList()
+        return DamageEstimate(
+            moveId = normalizeToken(moveName),
+            moveName = moveName,
+            minDamage = null,
+            maxDamage = null,
+            minPercent = null,
+            maxPercent = null,
+            koLabel = "Status",
+            confidence = if (guessed) DamageConfidence.LOW else DamageConfidence.HIGH,
+            warnings = warnings,
+            supported = true,
+            emphasized = emphasized,
+            outcome = CalcMoveOutcome.STATUS
+        )
+    }
+
+    internal fun unsupportedEstimate(
         moveName: String,
         warning: String = "Unsupported",
         guessed: Boolean = false,
@@ -1217,7 +1261,8 @@ object BestEffortDamageEngine : DamageEngine {
             confidence = DamageConfidence.LOW,
             warnings = warnings,
             supported = false,
-            emphasized = emphasized
+            emphasized = emphasized,
+            outcome = CalcMoveOutcome.UNSUPPORTED
         )
     }
 

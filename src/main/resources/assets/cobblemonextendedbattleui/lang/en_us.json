@@ -49,6 +49,10 @@
   "cobblemonextendedbattleui.config.debugDumpEnabled": "Debug: Write Calc Dumps",
   "cobblemonextendedbattleui.config.debugDumpEnabled.tooltip": "Write every unique battle snapshot plus full calc result (rolls, crit rolls, spread source, warnings) to config/deltacalc/latest-calc.json. Useful for reporting calc issues — leave off otherwise.",
 
+  "cobblemonextendedbattleui.config.category.layout": "Layout",
+  "cobblemonextendedbattleui.config.resetHudLayout": "Reset HUD Layout on Done",
+  "cobblemonextendedbattleui.config.resetHudLayout.tooltip": "When enabled, clicking Done restores default positions and sizes for the Battle Info Panel, Damage Calc, Battle Log, and Team Indicators. Other settings like font scale, feature toggles, and collapsed states are preserved. Has no effect if you click Cancel.",
+
   "cobblemonextendedbattleui.stat.attack": "Attack",
   "cobblemonextendedbattleui.stat.attack.abbr": "Atk",
   "cobblemonextendedbattleui.stat.defense": "Defense",

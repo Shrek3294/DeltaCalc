@@ -2,17 +2,21 @@ package com.cobblemonextendedbattleui.ui.calc
 
 import com.cobblemonextendedbattleui.UIUtils
 import com.cobblemonextendedbattleui.calc.CalcComputationService
+import com.cobblemonextendedbattleui.calc.CalcMoveOutcome
 import com.cobblemonextendedbattleui.calc.CalcMoveRow
 import com.cobblemonextendedbattleui.calc.CalcPokemonSnapshot
 import com.cobblemonextendedbattleui.calc.CalcPreviewTab
 import com.cobblemonextendedbattleui.calc.CalcRenderModel
+import com.cobblemonextendedbattleui.calc.DamageConfidence
 import com.cobblemonextendedbattleui.calc.InferenceValueState
 import com.cobblemonextendedbattleui.calc.OverrideRow
 import com.cobblemonextendedbattleui.compat.delta.DeltaBattlePlatformAdapter
+import com.cobblemonextendedbattleui.ui.shared.ResponsiveGeometry
 import com.cobblemonextendedbattleui.ui.shared.ScrollbarRenderer
 import com.cobblemonextendedbattleui.ui.shared.WidgetInteractionHandler
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
+import net.minecraft.text.Text
 import org.lwjgl.glfw.GLFW
 import java.util.UUID
 import kotlin.math.ceil
@@ -29,7 +33,6 @@ object DamageCalcPanel {
     private const val TAB_GAP = 3
     private const val TAB_TEXT_SCALE_OFFSET = 0.18f
     private const val TAB_TEXT_SCALE_MIN = 0.42f
-    private const val TAB_TEXT_MAX_LENGTH = 5
     private const val TAB_MIN_WIDTH = 20
 
     // V2 palette (muted navy calc look).
@@ -39,18 +42,6 @@ object DamageCalcPanel {
     private val V2_ACCENT_GREEN = UIUtils.color(104, 211, 145)
     private val V2_ACCENT_YELLOW = UIUtils.color(246, 224, 94)
     private val V2_ACCENT_BLUE = UIUtils.color(147, 183, 220)
-
-    // Severity (drives KO label color + left accent bar + forecast fill).
-    private val SEV_OHKO_FG = UIUtils.color(255, 107, 107)
-    private val SEV_OHKO_BAR = UIUtils.color(229, 62, 62)
-    private val SEV_2HKO_FG = UIUtils.color(255, 174, 76)
-    private val SEV_2HKO_BAR = UIUtils.color(237, 137, 54)
-    private val SEV_3HKO_FG = UIUtils.color(255, 215, 76)
-    private val SEV_3HKO_BAR = UIUtils.color(214, 158, 46)
-    private val SEV_WEAK_FG = UIUtils.color(144, 163, 181)
-    private val SEV_WEAK_BAR = UIUtils.color(74, 85, 104)
-    private val SEV_STATUS_FG = UIUtils.color(147, 183, 220)
-    private val SEV_STATUS_BAR = UIUtils.color(90, 122, 154)
 
     // HP bar palette.
     private val HP_GOOD = UIUtils.color(72, 187, 120)
@@ -89,23 +80,43 @@ object DamageCalcPanel {
     private var wasMouseDown = false
     private var wasRightMouseDown = false
     private var lastBounds = intArrayOf(0, 0, 0, 0)
-    private var lastTeamHeaderBounds = intArrayOf(0, 0, 0, 0)
-    private var lastSummaryBounds = intArrayOf(0, 0, 0, 0)
-    private var lastMovesHeaderBounds = intArrayOf(0, 0, 0, 0)
-    private var lastItemRowBounds = intArrayOf(0, 0, 0, 0)
-    private var lastAbilityRowBounds = intArrayOf(0, 0, 0, 0)
-    private var lastSpreadRowBounds = intArrayOf(0, 0, 0, 0)
-    private var lastItemBackBounds = intArrayOf(0, 0, 0, 0)
-    private var lastAbilityBackBounds = intArrayOf(0, 0, 0, 0)
-    private var lastSpreadBackBounds = intArrayOf(0, 0, 0, 0)
+    private var lastTeamHeaderBounds = CalcHitBounds.EMPTY
+    private var lastSummaryBounds = CalcHitBounds.EMPTY
+    private var lastMovesHeaderBounds = CalcHitBounds.EMPTY
+    private var lastItemPrevBounds = CalcHitBounds.EMPTY
+    private var lastItemNextBounds = CalcHitBounds.EMPTY
+    private var lastItemBodyBounds = CalcHitBounds.EMPTY
+    private var lastItemResetBounds = CalcHitBounds.EMPTY
+    private var lastAbilityPrevBounds = CalcHitBounds.EMPTY
+    private var lastAbilityNextBounds = CalcHitBounds.EMPTY
+    private var lastAbilityBodyBounds = CalcHitBounds.EMPTY
+    private var lastAbilityResetBounds = CalcHitBounds.EMPTY
+    private var lastSpreadPrevBounds = CalcHitBounds.EMPTY
+    private var lastSpreadNextBounds = CalcHitBounds.EMPTY
+    private var lastSpreadBodyBounds = CalcHitBounds.EMPTY
+    private var lastSpreadResetBounds = CalcHitBounds.EMPTY
     private var lastPlayerTabBounds = emptyList<TabBounds>()
     private var lastOpponentTabBounds = emptyList<TabBounds>()
     private var summaryClickArmed = false
     private var pendingTabSelection: PendingTabSelection? = null
     private var pendingSectionToggle: SectionToggle? = null
-    private var pendingOverrideClick: PendingOverrideClick? = null
+    private var armedOverride: ArmedOverride? = null
 
-    private data class PendingOverrideClick(val row: OverrideRow, val direction: Int)
+    private enum class OverrideAction {
+        PREV,
+        NEXT,
+        RESET
+    }
+
+    private data class ArmedOverride(
+        val row: OverrideRow,
+        val action: OverrideAction
+    )
+
+    private fun tr(key: String, vararg args: Any): String {
+        return if (args.isEmpty()) Text.translatable(key).string
+        else Text.translatable(key, *args).string
+    }
 
     fun initialize() {
         CalcPanelState.load()
@@ -118,37 +129,180 @@ object DamageCalcPanel {
             wasRightMouseDown = false
             pendingTabSelection = null
             pendingSectionToggle = null
-            pendingOverrideClick = null
+            armedOverride = null
             isScrollbarDragging = false
+            lastContentViewportTop = 0
+            lastContentViewportBottom = 0
+            lastContentHeight = 0
+            contentScrollOffset = 0
             return
         }
 
         val mc = MinecraftClient.getInstance()
         val model = CalcComputationService.currentModel() ?: return
         val screenWidth = mc.window.scaledWidth
-        val width = CalcPanelState.width ?: DEFAULT_WIDTH
-        val fullHeight = CalcPanelState.height ?: DEFAULT_HEIGHT
-        val height = if (CalcPanelState.expanded) fullHeight else COLLAPSED_HEIGHT
-        val x = CalcPanelState.x ?: (screenWidth - width - 14)
-        val y = CalcPanelState.y ?: 100
+        val screenHeight = mc.window.scaledHeight
+
+        val minWidth = 180
+        val minHeight = COLLAPSED_HEIGHT
+        val maxWidth = minOf(screenWidth, maxOf(minWidth, (screenWidth * 0.65f).toInt()))
+        val maxHeight = minOf(screenHeight, maxOf(minHeight, (screenHeight * 0.8f).toInt()))
+
+        val requestedHeight = if (CalcPanelState.expanded) CalcPanelState.height else COLLAPSED_HEIGHT
+        val defaultHeight = if (CalcPanelState.expanded) DEFAULT_HEIGHT else COLLAPSED_HEIGHT
+
+        val bounds = ResponsiveGeometry.reconcile(
+            x = CalcPanelState.x,
+            y = CalcPanelState.y,
+            width = CalcPanelState.width,
+            height = requestedHeight,
+            viewportWidth = screenWidth,
+            viewportHeight = screenHeight,
+            defaultWidth = DEFAULT_WIDTH,
+            defaultHeight = defaultHeight,
+            minWidth = minWidth,
+            minHeight = minHeight,
+            maxWidth = maxWidth,
+            maxHeight = maxHeight,
+            defaultX = { resolvedWidth, vw -> vw - resolvedWidth - 14 },
+            defaultY = { _, _ -> 100 }
+        )
+
+        // Strict viability checks using CalcContentViability
+        if (!CalcContentViability.canRenderHeader(bounds.width, bounds.height, UIUtils.FRAME_INSET)) {
+            interaction.releaseAll()
+            wasMouseDown = false
+            wasRightMouseDown = false
+            pendingTabSelection = null
+            pendingSectionToggle = null
+            armedOverride = null
+            isScrollbarDragging = false
+            lastContentViewportTop = 0
+            lastContentViewportBottom = 0
+            lastContentHeight = 0
+            contentScrollOffset = 0
+            return
+        }
+
+        val canRenderContent = CalcContentViability.canRenderContent(
+            panelWidth = bounds.width,
+            panelHeight = bounds.height,
+            isExpanded = CalcPanelState.expanded,
+            frameInset = UIUtils.FRAME_INSET,
+            headerHeight = HEADER_HEIGHT,
+            cellGap = UIUtils.CELL_GAP
+        )
+
+        val x = bounds.x
+        val y = bounds.y
+        val width = bounds.width
+        val height = bounds.height
 
         lastBounds = intArrayOf(x, y, width, height)
+
+        val mouseX = (mc.mouse.x * mc.window.scaledWidth / mc.window.width).toInt()
+        val mouseY = (mc.mouse.y * mc.window.scaledHeight / mc.window.height).toInt()
         handleInput(mc, x, y, width, height, model)
 
         UIUtils.renderPopupFrame(context, x, y, width, height)
         val cellX = x + UIUtils.FRAME_INSET
         val cellY = y + UIUtils.FRAME_INSET
         val cellW = width - UIUtils.FRAME_INSET * 2
-        val compact = mc.window.scaledWidth < 640 || mc.window.scaledHeight < 400 || cellW < 200
-        UIUtils.drawPopupCell(context, cellX, cellY, cellW, HEADER_HEIGHT)
-        // V2 live-status dot + neutral title.
-        context.fill(cellX + 6, cellY + 8, cellX + 9, cellY + 11, V2_ACCENT_GREEN)
-        UIUtils.drawText(context, "DAMAGE CALC", (cellX + 13).toFloat(), (cellY + 5).toFloat(), V2_TEXT, BASE_FONT_SCALE)
-        UIUtils.drawText(context, "T${model.snapshot.turn}", (cellX + cellW - 28).toFloat(), (cellY + 5).toFloat(), V2_TEXT_DIM, BASE_FONT_SCALE)
 
-        if (!CalcPanelState.expanded) {
+        // Determine content tier purely from actual content width after insets and scrollbar
+        val moveRowAvailableWidth = (cellW - 12).coerceAtLeast(0)
+        val panelTier = CalcMoveRowTier.fromWidth(moveRowAvailableWidth)
+        val compact = panelTier != CalcMoveRowTier.WIDE
+
+        // Header layout computation
+        val trFont = MinecraftClient.getInstance().textRenderer
+        val measurer = { text: String -> (trFont.getWidth(text) * BASE_FONT_SCALE).roundToInt() }
+        val hasLowOrUnsupported = model.yourMoves.any { it.confidence == DamageConfidence.LOW || !it.supported || it.outcome == CalcMoveOutcome.UNSUPPORTED } ||
+            model.opponentMoves.any { it.confidence == DamageConfidence.LOW || !it.supported || it.outcome == CalcMoveOutcome.UNSUPPORTED }
+
+        val headerLayout = CalcPresentation.calculateHeaderLayout(
+            availableWidth = cellW,
+            tier = panelTier,
+            warningCount = model.warningTexts.size,
+            hasLowOrUnsupported = hasLowOrUnsupported,
+            turn = model.snapshot.turn,
+            isExpanded = canRenderContent,
+            measurer = measurer,
+            fullTitle = tr("deltacalc.calc.title"),
+            shortTitle = tr("deltacalc.calc.title.short"),
+            turnText = tr("deltacalc.calc.turn", model.snapshot.turn),
+            warningChipText = tr("deltacalc.calc.warning.chip", model.warningTexts.size),
+            chevronExpandedText = "\u25BE",
+            chevronCollapsedText = "\u25B8"
+        )
+
+        UIUtils.drawPopupCell(context, cellX, cellY, cellW, HEADER_HEIGHT)
+
+        // Live-status dot
+        if (cellW >= 16) {
+            context.fill(cellX + 6, cellY + 8, cellX + 9, cellY + 11, V2_ACCENT_GREEN)
+        }
+
+        // Title
+        if (headerLayout.titleWidth > 0) {
+            val safeTitle = truncateToWidth(headerLayout.title, headerLayout.titleWidth, BASE_FONT_SCALE)
+            if (safeTitle.isNotEmpty()) {
+                UIUtils.drawText(context, safeTitle, (cellX + headerLayout.titleX).toFloat(), (cellY + 5).toFloat(), V2_TEXT, BASE_FONT_SCALE)
+            }
+        }
+
+        // Turn text (dropped before warning chip when space is tight)
+        if (headerLayout.turnVisible && headerLayout.turnWidth > 0) {
+            UIUtils.drawText(context, tr("deltacalc.calc.turn", model.snapshot.turn), (cellX + headerLayout.turnX).toFloat(), (cellY + 5).toFloat(), V2_TEXT_DIM, BASE_FONT_SCALE)
+        }
+
+        // Warning chip !N
+        if (headerLayout.warningChipVisible && headerLayout.warningChipWidth > 0) {
+            val chipBg = if (headerLayout.warningChipIsRed) UIUtils.color(180, 40, 40, 220) else UIUtils.color(180, 130, 30, 220)
+            val chipFg = UIUtils.color(255, 255, 255)
+            val chipText = tr("deltacalc.calc.warning.chip", model.warningTexts.size)
+            val chipY = cellY + 4
+            val chipH = 10
+            context.fill(cellX + headerLayout.warningChipX, chipY, cellX + headerLayout.warningChipX + headerLayout.warningChipWidth, chipY + chipH, chipBg)
+            val chipScale = BASE_FONT_SCALE * 0.85f
+            val chipPad = if (cellW >= 40) 4 else 2
+            val maxChipTextW = maxOf(0, headerLayout.warningChipWidth - chipPad * 2)
+            val safeChipText = truncateToWidth(chipText, maxChipTextW, chipScale)
+            if (safeChipText.isNotEmpty()) {
+                val chipTextW = (trFont.getWidth(safeChipText) * chipScale).roundToInt()
+                val textOffsetX = maxOf(0, (headerLayout.warningChipWidth - chipTextW) / 2)
+                UIUtils.drawText(context, safeChipText, (cellX + headerLayout.warningChipX + textOffsetX).toFloat(), (chipY + 1).toFloat(), chipFg, chipScale)
+            }
+        }
+
+        // Header chevron
+        if (headerLayout.chevronWidth > 0) {
+            val chevronText = if (canRenderContent) "\u25BE" else "\u25B8"
+            UIUtils.drawText(context, chevronText, (cellX + headerLayout.chevronX).toFloat(), (cellY + 5).toFloat(), V2_TEXT_DIM, BASE_FONT_SCALE)
+        }
+
+        if (!canRenderContent) {
             lastPlayerTabBounds = emptyList()
             lastOpponentTabBounds = emptyList()
+            lastItemPrevBounds = CalcHitBounds.EMPTY
+            lastItemNextBounds = CalcHitBounds.EMPTY
+            lastItemBodyBounds = CalcHitBounds.EMPTY
+            lastItemResetBounds = CalcHitBounds.EMPTY
+            lastAbilityPrevBounds = CalcHitBounds.EMPTY
+            lastAbilityNextBounds = CalcHitBounds.EMPTY
+            lastAbilityBodyBounds = CalcHitBounds.EMPTY
+            lastAbilityResetBounds = CalcHitBounds.EMPTY
+            lastSpreadPrevBounds = CalcHitBounds.EMPTY
+            lastSpreadNextBounds = CalcHitBounds.EMPTY
+            lastSpreadBodyBounds = CalcHitBounds.EMPTY
+            lastSpreadResetBounds = CalcHitBounds.EMPTY
+            lastSummaryBounds = CalcHitBounds.EMPTY
+            lastMovesHeaderBounds = CalcHitBounds.EMPTY
+            lastTeamHeaderBounds = CalcHitBounds.EMPTY
+            lastContentViewportTop = 0
+            lastContentViewportBottom = 0
+            lastContentHeight = 0
+            contentScrollOffset = 0
             drawResizeHandle(context, x, y, width, height)
             return
         }
@@ -161,20 +315,52 @@ object DamageCalcPanel {
         val textScale = BASE_FONT_SCALE * CalcPanelState.fontScale
         val uiScale = CalcPanelState.fontScale
         fun s(n: Int): Int = (n * uiScale).roundToInt().coerceAtLeast(1)
+        val safeLineW = maxOf(0, cellW - 12)
 
-        // V2 matchup row — YOU / OPP with name + HP bar + HP% + speed indicator.
+        // Compact warning strip below header when height permits
+        val stripH = s(10)
+        val canFitWarningStrip = model.warningTexts.isNotEmpty() && contentH >= stripH + s(60)
+        if (canFitWarningStrip) {
+            val firstWarning = model.warningTexts.first()
+            val warningSummary = if (model.warningTexts.size > 1) {
+                "$firstWarning (${tr("deltacalc.calc.warning.more", model.warningTexts.size - 1)})"
+            } else {
+                firstWarning
+            }
+            val stripBg = if (hasLowOrUnsupported) UIUtils.color(180, 40, 40, 50) else UIUtils.color(214, 158, 46, 50)
+            val stripBorder = if (hasLowOrUnsupported) UIUtils.color(229, 62, 62, 120) else UIUtils.color(214, 158, 46, 120)
+            val stripFg = if (hasLowOrUnsupported) UIUtils.color(255, 120, 120) else UIUtils.color(246, 224, 94)
+
+            val stripLeft = cellX + 4
+            val stripRight = cellX + cellW - 4
+            context.fill(stripLeft, textY, stripRight, textY + stripH, stripBg)
+            context.fill(stripLeft, textY, stripRight, textY + 1, stripBorder)
+            context.fill(stripLeft, textY + stripH - 1, stripRight, textY + stripH, stripBorder)
+            context.fill(stripLeft, textY, stripLeft + 1, textY + stripH, stripBorder)
+            context.fill(stripRight - 1, textY, stripRight, textY + stripH, stripBorder)
+
+            val safeWarningText = truncateToWidth("! $warningSummary", cellW - 14, textScale)
+            UIUtils.drawText(context, safeWarningText, (stripLeft + 3).toFloat(), (textY + 1).toFloat(), stripFg, textScale)
+            textY += stripH + s(4)
+        }
+
+        // V2 matchup row — measured compact combined form or full two-column layout
         textY = drawMatchupSection(context, cellX, textY, cellW, model.selectedPlayer, model.selectedOpponent, model.speedText, textScale, uiScale, compact)
 
         val tabAreaWidth = cellW - 12
-        val summaryToggle = if (CalcPanelState.summaryExpanded) "[-]" else "[+]"
+        val summaryChevron = if (CalcPanelState.summaryExpanded) "\u25BE" else "\u25B8"
         val summaryStartY = textY
-        UIUtils.drawText(context, "$summaryToggle ${model.matchupLabel}", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
+        val safeSummaryLabel = truncateToWidth("$summaryChevron ${model.matchupLabel}", safeLineW, textScale)
+        UIUtils.drawText(context, safeSummaryLabel, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
         textY += s(11)
+
         if (CalcPanelState.summaryExpanded) {
             if (!compact) {
+                val previewText = if (model.isPreview) tr("deltacalc.calc.preview.switch") else tr("deltacalc.calc.preview.active")
+                val safePreviewText = truncateToWidth(previewText, safeLineW, textScale)
                 UIUtils.drawText(
                     context,
-                    if (model.isPreview) "Previewing switch matchup" else "Current active matchup",
+                    safePreviewText,
                     (cellX + 6).toFloat(),
                     textY.toFloat(),
                     if (model.isPreview) V2_ACCENT_YELLOW else V2_TEXT_LABEL,
@@ -182,112 +368,239 @@ object DamageCalcPanel {
                 )
                 textY += s(10)
                 model.switchSummaryText?.let { switchSummary ->
-                    UIUtils.drawText(context, switchSummary, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
+                    val safeSwitch = truncateToWidth(switchSummary, safeLineW, textScale)
+                    UIUtils.drawText(context, safeSwitch, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
                     textY += s(10)
                 }
             }
             model.hazardNoteText?.let { note ->
-                UIUtils.drawText(context, note, (cellX + 6).toFloat(), textY.toFloat(), UIUtils.color(245, 180, 120), textScale)
+                val safeNote = truncateToWidth(note, safeLineW, textScale)
+                UIUtils.drawText(context, safeNote, (cellX + 6).toFloat(), textY.toFloat(), UIUtils.color(245, 180, 120), textScale)
                 textY += s(10)
             }
-            // Speed line shows in both compact and full modes so users can tell
-            // at a glance whether overrides moved the speed comparison. The
-            // speedText already starts with "Speed: ..." so no extra label needed.
             model.speedText?.let { speedText ->
-                UIUtils.drawText(context, speedText, (cellX + 6).toFloat(), textY.toFloat(), speedColor(speedText), textScale)
+                val safeSpeed = truncateToWidth(speedText, safeLineW, textScale)
+                UIUtils.drawText(context, safeSpeed, (cellX + 6).toFloat(), textY.toFloat(), speedColor(speedText), textScale)
                 textY += s(10)
             }
+
             val opponentUuid = model.selectedOpponentUuid
             val itemOverridden = opponentUuid?.let { CalcComputationService.hasOverride(it, OverrideRow.ITEM) } ?: false
             val abilityOverridden = opponentUuid?.let { CalcComputationService.hasOverride(it, OverrideRow.ABILITY) } ?: false
             val spreadOverridden = opponentUuid?.let { CalcComputationService.hasOverride(it, OverrideRow.SPREAD) } ?: false
-            // A row is "battle-revealed" (locked) when its inference state is
-            // REVEALED and the user hasn't overridden it. Real reveals beat
-            // overrides downstream, so cycling them does nothing visible —
-            // hide the arrows and disable the click target to avoid the
-            // misleading "I clicked but nothing happened" feedback.
+
             val itemRealRevealed = !itemOverridden && model.opponentSet.item.second == InferenceValueState.REVEALED
             val abilityRealRevealed = !abilityOverridden && model.opponentSet.ability.second == InferenceValueState.REVEALED
             val itemHasAlts = !itemRealRevealed && model.opponentSet.itemAlternatives.size > 1
             val abilityHasAlts = !abilityRealRevealed && model.opponentSet.abilityAlternatives.size > 1
             val spreadHasAlts = model.opponentSet.spreadAlternatives.size > 1
+
             val rowHeight = s(11).coerceAtLeast(8)
-            val pillX = cellX + cellW - s(34).coerceAtLeast(18)
-            val forwardX = pillX - s(8)
-            val backX = pillX - s(18)
-            val backZoneW = s(8).coerceAtLeast(6)
+            val pillScale = (textScale - 0.15f).coerceAtLeast(0.42f)
+
+            // 1. Item row
+            val itemPillLabel = pillLabel(model.opponentSet.item.second, itemOverridden)
+            val itemTextW = (trFont.getWidth(itemPillLabel) * pillScale).roundToInt()
+            val itemPillW = CalcPresentation.pillTotalWidth(itemTextW, uiScale)
+            val itemLayout = CalcPresentation.calculateOverrideRowLayout(
+                rowX = cellX + 4,
+                rowY = textY - 2,
+                rowW = cellW - 8,
+                rowH = rowHeight,
+                hasAlts = itemHasAlts,
+                isOverridden = itemOverridden,
+                pillWidth = itemPillW,
+                uiScale = uiScale
+            )
+            lastItemPrevBounds = itemLayout.prevBounds
+            lastItemNextBounds = itemLayout.nextBounds
+            lastItemBodyBounds = itemLayout.bodyBounds
+            lastItemResetBounds = itemLayout.resetBounds
 
             val itemValue = formatInference(model.opponentSet.item.first)
             val itemUsage = model.opponentSet.itemUsagePercent[normalizeForUsageLookup(model.opponentSet.item.first)]
-            val itemDisplay = buildOverrideRowText(itemValue, itemUsage, itemOverridden)
-            UIUtils.drawText(context, "Item: $itemDisplay", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
-            drawStatePill(context, pillX, textY - 1, model.opponentSet.item.second, textScale, uiScale, itemOverridden)
-            if (itemHasAlts) {
-                UIUtils.drawText(context, "<", backX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
-                UIUtils.drawText(context, ">", forwardX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
-                lastItemBackBounds = intArrayOf(backX - 1, textY - 2, backZoneW, rowHeight)
-                lastItemRowBounds = intArrayOf(cellX + 4, textY - 2, cellW - 8, rowHeight)
-            } else {
-                lastItemBackBounds = intArrayOf(0, 0, 0, 0)
-                lastItemRowBounds = intArrayOf(0, 0, 0, 0)
+            val itemDisplay = buildOverrideRowText(itemValue, itemUsage)
+
+            // Body hover/pressed feedback
+            if (!itemLayout.bodyBounds.isEmpty && itemLayout.bodyBounds.contains(mouseX, mouseY)) {
+                val isBodyPressed = armedOverride == ArmedOverride(OverrideRow.ITEM, OverrideAction.NEXT)
+                val bodyCol = if (isBodyPressed) UIUtils.color(56, 109, 161, 60) else UIUtils.color(255, 255, 255, 12)
+                context.fill(itemLayout.bodyBounds.x, itemLayout.bodyBounds.y, itemLayout.bodyBounds.right, itemLayout.bodyBounds.bottom, bodyCol)
+            }
+            val maxItemTextW = if (!itemLayout.bodyBounds.isEmpty) itemLayout.bodyBounds.width - 2 else maxOf(0, itemLayout.pillBounds.x - cellX - 8)
+            val safeItemDisplay = truncateToWidth("${tr("deltacalc.calc.item")}: $itemDisplay", maxItemTextW, textScale)
+            UIUtils.drawText(context, safeItemDisplay, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
+
+            if (!itemLayout.pillBounds.isEmpty) {
+                drawStatePill(context, itemLayout.pillBounds.x, textY - 1, model.opponentSet.item.second, textScale, uiScale, itemOverridden)
+            }
+            if (itemLayout.prevVisible) {
+                val isHovered = itemLayout.prevBounds.contains(mouseX, mouseY)
+                val isArmed = armedOverride == ArmedOverride(OverrideRow.ITEM, OverrideAction.PREV)
+                val col = if (isArmed) V2_ACCENT_BLUE else if (isHovered) V2_TEXT else V2_TEXT_DIM
+                if (isHovered) context.fill(itemLayout.prevBounds.x, itemLayout.prevBounds.y, itemLayout.prevBounds.right, itemLayout.prevBounds.bottom, UIUtils.color(255, 255, 255, 15))
+                UIUtils.drawText(context, tr("deltacalc.calc.control.prev"), (itemLayout.prevBounds.x + 1).toFloat(), textY.toFloat(), col, textScale)
+            }
+            if (itemLayout.nextVisible) {
+                val isHovered = itemLayout.nextBounds.contains(mouseX, mouseY)
+                val isArmed = armedOverride == ArmedOverride(OverrideRow.ITEM, OverrideAction.NEXT)
+                val col = if (isArmed) V2_ACCENT_BLUE else if (isHovered) V2_TEXT else V2_TEXT_DIM
+                if (isHovered) context.fill(itemLayout.nextBounds.x, itemLayout.nextBounds.y, itemLayout.nextBounds.right, itemLayout.nextBounds.bottom, UIUtils.color(255, 255, 255, 15))
+                UIUtils.drawText(context, tr("deltacalc.calc.control.next"), (itemLayout.nextBounds.x + 1).toFloat(), textY.toFloat(), col, textScale)
+            }
+            if (itemLayout.resetVisible) {
+                val isHovered = itemLayout.resetBounds.contains(mouseX, mouseY)
+                val isArmed = armedOverride == ArmedOverride(OverrideRow.ITEM, OverrideAction.RESET)
+                val col = if (isArmed) UIUtils.color(255, 255, 255) else if (isHovered) UIUtils.color(255, 107, 107) else UIUtils.color(200, 100, 100, 180)
+                if (isHovered) context.fill(itemLayout.resetBounds.x, itemLayout.resetBounds.y, itemLayout.resetBounds.right, itemLayout.resetBounds.bottom, UIUtils.color(255, 107, 107, 25))
+                UIUtils.drawText(context, tr("deltacalc.calc.control.reset"), (itemLayout.resetBounds.x + 1).toFloat(), textY.toFloat(), col, textScale)
             }
             textY += s(10)
+
+            // 2. Ability row
+            val abilityPillLabel = pillLabel(model.opponentSet.ability.second, abilityOverridden)
+            val abilityTextW = (trFont.getWidth(abilityPillLabel) * pillScale).roundToInt()
+            val abilityPillW = CalcPresentation.pillTotalWidth(abilityTextW, uiScale)
+            val abilityLayout = CalcPresentation.calculateOverrideRowLayout(
+                rowX = cellX + 4,
+                rowY = textY - 2,
+                rowW = cellW - 8,
+                rowH = rowHeight,
+                hasAlts = abilityHasAlts,
+                isOverridden = abilityOverridden,
+                pillWidth = abilityPillW,
+                uiScale = uiScale
+            )
+            lastAbilityPrevBounds = abilityLayout.prevBounds
+            lastAbilityNextBounds = abilityLayout.nextBounds
+            lastAbilityBodyBounds = abilityLayout.bodyBounds
+            lastAbilityResetBounds = abilityLayout.resetBounds
 
             val abilityValue = formatInference(model.opponentSet.ability.first)
             val abilityUsage = model.opponentSet.abilityUsagePercent[normalizeForUsageLookup(model.opponentSet.ability.first)]
-            val abilityDisplay = buildOverrideRowText(abilityValue, abilityUsage, abilityOverridden)
-            UIUtils.drawText(context, "Ability: $abilityDisplay", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
-            drawStatePill(context, pillX, textY - 1, model.opponentSet.ability.second, textScale, uiScale, abilityOverridden)
-            if (abilityHasAlts) {
-                UIUtils.drawText(context, "<", backX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
-                UIUtils.drawText(context, ">", forwardX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
-                lastAbilityBackBounds = intArrayOf(backX - 1, textY - 2, backZoneW, rowHeight)
-                lastAbilityRowBounds = intArrayOf(cellX + 4, textY - 2, cellW - 8, rowHeight)
-            } else {
-                lastAbilityBackBounds = intArrayOf(0, 0, 0, 0)
-                lastAbilityRowBounds = intArrayOf(0, 0, 0, 0)
+            val abilityDisplay = buildOverrideRowText(abilityValue, abilityUsage)
+
+            if (!abilityLayout.bodyBounds.isEmpty && abilityLayout.bodyBounds.contains(mouseX, mouseY)) {
+                val isBodyPressed = armedOverride == ArmedOverride(OverrideRow.ABILITY, OverrideAction.NEXT)
+                val bodyCol = if (isBodyPressed) UIUtils.color(56, 109, 161, 60) else UIUtils.color(255, 255, 255, 12)
+                context.fill(abilityLayout.bodyBounds.x, abilityLayout.bodyBounds.y, abilityLayout.bodyBounds.right, abilityLayout.bodyBounds.bottom, bodyCol)
+            }
+            val maxAbilityTextW = if (!abilityLayout.bodyBounds.isEmpty) abilityLayout.bodyBounds.width - 2 else maxOf(0, abilityLayout.pillBounds.x - cellX - 8)
+            val safeAbilityDisplay = truncateToWidth("${tr("deltacalc.calc.ability")}: $abilityDisplay", maxAbilityTextW, textScale)
+            UIUtils.drawText(context, safeAbilityDisplay, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT, textScale)
+
+            if (!abilityLayout.pillBounds.isEmpty) {
+                drawStatePill(context, abilityLayout.pillBounds.x, textY - 1, model.opponentSet.ability.second, textScale, uiScale, abilityOverridden)
+            }
+            if (abilityLayout.prevVisible) {
+                val isHovered = abilityLayout.prevBounds.contains(mouseX, mouseY)
+                val isArmed = armedOverride == ArmedOverride(OverrideRow.ABILITY, OverrideAction.PREV)
+                val col = if (isArmed) V2_ACCENT_BLUE else if (isHovered) V2_TEXT else V2_TEXT_DIM
+                if (isHovered) context.fill(abilityLayout.prevBounds.x, abilityLayout.prevBounds.y, abilityLayout.prevBounds.right, abilityLayout.prevBounds.bottom, UIUtils.color(255, 255, 255, 15))
+                UIUtils.drawText(context, tr("deltacalc.calc.control.prev"), (abilityLayout.prevBounds.x + 1).toFloat(), textY.toFloat(), col, textScale)
+            }
+            if (abilityLayout.nextVisible) {
+                val isHovered = abilityLayout.nextBounds.contains(mouseX, mouseY)
+                val isArmed = armedOverride == ArmedOverride(OverrideRow.ABILITY, OverrideAction.NEXT)
+                val col = if (isArmed) V2_ACCENT_BLUE else if (isHovered) V2_TEXT else V2_TEXT_DIM
+                if (isHovered) context.fill(abilityLayout.nextBounds.x, abilityLayout.nextBounds.y, abilityLayout.nextBounds.right, abilityLayout.nextBounds.bottom, UIUtils.color(255, 255, 255, 15))
+                UIUtils.drawText(context, tr("deltacalc.calc.control.next"), (abilityLayout.nextBounds.x + 1).toFloat(), textY.toFloat(), col, textScale)
+            }
+            if (abilityLayout.resetVisible) {
+                val isHovered = abilityLayout.resetBounds.contains(mouseX, mouseY)
+                val isArmed = armedOverride == ArmedOverride(OverrideRow.ABILITY, OverrideAction.RESET)
+                val col = if (isArmed) UIUtils.color(255, 255, 255) else if (isHovered) UIUtils.color(255, 107, 107) else UIUtils.color(200, 100, 100, 180)
+                if (isHovered) context.fill(abilityLayout.resetBounds.x, abilityLayout.resetBounds.y, abilityLayout.resetBounds.right, abilityLayout.resetBounds.bottom, UIUtils.color(255, 107, 107, 25))
+                UIUtils.drawText(context, tr("deltacalc.calc.control.reset"), (abilityLayout.resetBounds.x + 1).toFloat(), textY.toFloat(), col, textScale)
             }
             textY += s(10)
 
-            // Spread row stays visible even in compact mode so users can still
-            // override it; only the source label below is dropped when compact.
-            val spreadValue = model.opponentSet.spreadLabel ?: "Unknown"
-            val spreadUsage = model.opponentSet.spread?.usagePercent
-            val spreadDisplay = buildOverrideRowText(spreadValue, spreadUsage, spreadOverridden)
-            UIUtils.drawText(context, "Spread: $spreadDisplay", (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
-            // Spread gets a MANUAL pill when overridden; otherwise the inference
-            // state pill (LIKELY for usage-derived, UNKNOWN for missing data).
+            // 3. Spread row
             val spreadState = model.opponentSet.spread?.state ?: InferenceValueState.UNKNOWN
-            drawStatePill(context, pillX, textY - 1, spreadState, textScale, uiScale, spreadOverridden)
-            if (spreadHasAlts) {
-                UIUtils.drawText(context, "<", backX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
-                UIUtils.drawText(context, ">", forwardX.toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
-                lastSpreadBackBounds = intArrayOf(backX - 1, textY - 2, backZoneW, rowHeight)
-            } else {
-                lastSpreadBackBounds = intArrayOf(0, 0, 0, 0)
+            val spreadPillLabel = pillLabel(spreadState, spreadOverridden)
+            val spreadTextW = (trFont.getWidth(spreadPillLabel) * pillScale).roundToInt()
+            val spreadPillW = CalcPresentation.pillTotalWidth(spreadTextW, uiScale)
+            val spreadLayout = CalcPresentation.calculateOverrideRowLayout(
+                rowX = cellX + 4,
+                rowY = textY - 2,
+                rowW = cellW - 8,
+                rowH = rowHeight,
+                hasAlts = spreadHasAlts,
+                isOverridden = spreadOverridden,
+                pillWidth = spreadPillW,
+                uiScale = uiScale
+            )
+            lastSpreadPrevBounds = spreadLayout.prevBounds
+            lastSpreadNextBounds = spreadLayout.nextBounds
+            lastSpreadBodyBounds = spreadLayout.bodyBounds
+            lastSpreadResetBounds = spreadLayout.resetBounds
+
+            val spreadValue = model.opponentSet.spreadLabel ?: tr("deltacalc.calc.unknown")
+            val spreadUsage = model.opponentSet.spread?.usagePercent
+            val spreadDisplay = buildOverrideRowText(spreadValue, spreadUsage)
+
+            if (!spreadLayout.bodyBounds.isEmpty && spreadLayout.bodyBounds.contains(mouseX, mouseY)) {
+                val isBodyPressed = armedOverride == ArmedOverride(OverrideRow.SPREAD, OverrideAction.NEXT)
+                val bodyCol = if (isBodyPressed) UIUtils.color(56, 109, 161, 60) else UIUtils.color(255, 255, 255, 12)
+                context.fill(spreadLayout.bodyBounds.x, spreadLayout.bodyBounds.y, spreadLayout.bodyBounds.right, spreadLayout.bodyBounds.bottom, bodyCol)
             }
-            lastSpreadRowBounds = intArrayOf(cellX + 4, textY - 2, cellW - 8, rowHeight)
+            val maxSpreadTextW = if (!spreadLayout.bodyBounds.isEmpty) spreadLayout.bodyBounds.width - 2 else maxOf(0, spreadLayout.pillBounds.x - cellX - 8)
+            val safeSpreadDisplay = truncateToWidth("${tr("deltacalc.calc.spread")}: $spreadDisplay", maxSpreadTextW, textScale)
+            UIUtils.drawText(context, safeSpreadDisplay, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_DIM, textScale)
+
+            if (!spreadLayout.pillBounds.isEmpty) {
+                drawStatePill(context, spreadLayout.pillBounds.x, textY - 1, spreadState, textScale, uiScale, spreadOverridden)
+            }
+            if (spreadLayout.prevVisible) {
+                val isHovered = spreadLayout.prevBounds.contains(mouseX, mouseY)
+                val isArmed = armedOverride == ArmedOverride(OverrideRow.SPREAD, OverrideAction.PREV)
+                val col = if (isArmed) V2_ACCENT_BLUE else if (isHovered) V2_TEXT else V2_TEXT_DIM
+                if (isHovered) context.fill(spreadLayout.prevBounds.x, spreadLayout.prevBounds.y, spreadLayout.prevBounds.right, spreadLayout.prevBounds.bottom, UIUtils.color(255, 255, 255, 15))
+                UIUtils.drawText(context, tr("deltacalc.calc.control.prev"), (spreadLayout.prevBounds.x + 1).toFloat(), textY.toFloat(), col, textScale)
+            }
+            if (spreadLayout.nextVisible) {
+                val isHovered = spreadLayout.nextBounds.contains(mouseX, mouseY)
+                val isArmed = armedOverride == ArmedOverride(OverrideRow.SPREAD, OverrideAction.NEXT)
+                val col = if (isArmed) V2_ACCENT_BLUE else if (isHovered) V2_TEXT else V2_TEXT_DIM
+                if (isHovered) context.fill(spreadLayout.nextBounds.x, spreadLayout.nextBounds.y, spreadLayout.nextBounds.right, spreadLayout.nextBounds.bottom, UIUtils.color(255, 255, 255, 15))
+                UIUtils.drawText(context, tr("deltacalc.calc.control.next"), (spreadLayout.nextBounds.x + 1).toFloat(), textY.toFloat(), col, textScale)
+            }
+            if (spreadLayout.resetVisible) {
+                val isHovered = spreadLayout.resetBounds.contains(mouseX, mouseY)
+                val isArmed = armedOverride == ArmedOverride(OverrideRow.SPREAD, OverrideAction.RESET)
+                val col = if (isArmed) UIUtils.color(255, 255, 255) else if (isHovered) UIUtils.color(255, 107, 107) else UIUtils.color(200, 100, 100, 180)
+                if (isHovered) context.fill(spreadLayout.resetBounds.x, spreadLayout.resetBounds.y, spreadLayout.resetBounds.right, spreadLayout.resetBounds.bottom, UIUtils.color(255, 107, 107, 25))
+                UIUtils.drawText(context, tr("deltacalc.calc.control.reset"), (spreadLayout.resetBounds.x + 1).toFloat(), textY.toFloat(), col, textScale)
+            }
             textY += s(9)
+
             if (!compact) {
-                UIUtils.drawText(context, model.opponentSet.sourceLabel, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_LABEL, textScale)
+                val safeSource = truncateToWidth(model.opponentSet.sourceLabel, safeLineW, textScale)
+                UIUtils.drawText(context, safeSource, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_LABEL, textScale)
                 textY += s(10)
             } else {
                 textY += s(2)
             }
         } else {
-            UIUtils.drawText(context, model.opponentSet.sourceLabel, (cellX + 20).toFloat(), (textY - 1).toFloat(), V2_TEXT_LABEL, textScale)
+            val safeSource = truncateToWidth(model.opponentSet.sourceLabel, maxOf(0, cellW - 26), textScale)
+            UIUtils.drawText(context, safeSource, (cellX + 20).toFloat(), (textY - 1).toFloat(), V2_TEXT_LABEL, textScale)
             textY += s(8)
-            // Summary collapsed: rows aren't drawn so disable click-fire on stale bounds.
-            lastItemRowBounds = intArrayOf(0, 0, 0, 0)
-            lastAbilityRowBounds = intArrayOf(0, 0, 0, 0)
-            lastSpreadRowBounds = intArrayOf(0, 0, 0, 0)
-            lastItemBackBounds = intArrayOf(0, 0, 0, 0)
-            lastAbilityBackBounds = intArrayOf(0, 0, 0, 0)
-            lastSpreadBackBounds = intArrayOf(0, 0, 0, 0)
+            lastItemPrevBounds = CalcHitBounds.EMPTY
+            lastItemNextBounds = CalcHitBounds.EMPTY
+            lastItemBodyBounds = CalcHitBounds.EMPTY
+            lastItemResetBounds = CalcHitBounds.EMPTY
+            lastAbilityPrevBounds = CalcHitBounds.EMPTY
+            lastAbilityNextBounds = CalcHitBounds.EMPTY
+            lastAbilityBodyBounds = CalcHitBounds.EMPTY
+            lastAbilityResetBounds = CalcHitBounds.EMPTY
+            lastSpreadPrevBounds = CalcHitBounds.EMPTY
+            lastSpreadNextBounds = CalcHitBounds.EMPTY
+            lastSpreadBodyBounds = CalcHitBounds.EMPTY
+            lastSpreadResetBounds = CalcHitBounds.EMPTY
         }
 
-        lastSummaryBounds = intArrayOf(cellX, summaryStartY - 2, cellW, (textY - summaryStartY + 2).coerceAtLeast(12))
-        // Subtle 1px border around the predicted-set block (mockup style).
+        lastSummaryBounds = CalcHitBounds(cellX, summaryStartY - 2, cellW, (textY - summaryStartY + 2).coerceAtLeast(12))
+
         val boxColor = UIUtils.color(255, 255, 255, 28)
         val boxTop = summaryStartY - 3
         val boxBot = textY - 2
@@ -300,13 +613,24 @@ object DamageCalcPanel {
         textY += s(6)
 
         // ─── Scrollable content viewport (move predictions + team) ─────────
-        // Scissor clips rendering to the panel; matrix translate lets the
-        // existing inline `textY` accumulators stay unchanged. Click bounds
-        // captured inside the viewport subtract the scroll offset so they
-        // sit in screen coords and handleInput tests work bare.
+        val panelBottomLimit = y + height - UIUtils.FRAME_INSET
         val viewportTop = textY
-        val viewportBottom = (y + height - UIUtils.FRAME_INSET).coerceAtLeast(viewportTop + 16)
+        val viewportBottom = panelBottomLimit
         val viewportHeight = viewportBottom - viewportTop
+
+        if (viewportHeight <= 0) {
+            lastMovesHeaderBounds = CalcHitBounds.EMPTY
+            lastTeamHeaderBounds = CalcHitBounds.EMPTY
+            lastPlayerTabBounds = emptyList()
+            lastOpponentTabBounds = emptyList()
+            lastContentViewportTop = 0
+            lastContentViewportBottom = 0
+            lastContentHeight = 0
+            contentScrollOffset = 0
+            drawResizeHandle(context, x, y, width, height)
+            return
+        }
+
         val maxScroll = (lastContentHeight - viewportHeight).coerceAtLeast(0)
         contentScrollOffset = contentScrollOffset.coerceIn(0, maxScroll)
         val scrollOffset = contentScrollOffset
@@ -318,9 +642,11 @@ object DamageCalcPanel {
         context.enableScissor(cellX, viewportTop, cellX + cellW, viewportBottom)
         val contentStartY = textY
 
-        val movesHeader = if (CalcPanelState.movesSectionCollapsed) "[+] MOVE PREDICTIONS" else "[-] MOVE PREDICTIONS"
-        UIUtils.drawText(context, movesHeader, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_LABEL, textScale)
-        lastMovesHeaderBounds = intArrayOf(cellX, (textY - 2) - scrollOffset, cellW, s(11).coerceAtLeast(8))
+        val movesChevron = if (CalcPanelState.movesSectionCollapsed) "\u25B8" else "\u25BE"
+        val movesHeader = "$movesChevron " + tr("deltacalc.calc.move_predictions")
+        val safeMovesHeader = truncateToWidth(movesHeader, safeLineW, textScale)
+        UIUtils.drawText(context, safeMovesHeader, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_LABEL, textScale)
+        lastMovesHeaderBounds = CalcHitBounds(cellX, (textY - 2) - scrollOffset, cellW, s(11).coerceAtLeast(8))
         textY += s(10)
 
         if (!CalcPanelState.movesSectionCollapsed) {
@@ -328,34 +654,37 @@ object DamageCalcPanel {
             val opponentHpPct = hpPercent(model.selectedOpponent)
             val playerHpPct = hpPercent(model.selectedPlayer)
 
-            UIUtils.drawText(context, "YOU \u2192 OPPONENT", (cellX + 6).toFloat(), textY.toFloat(), V2_ACCENT_GREEN, textScale)
+            val safeYouToOpp = truncateToWidth(tr("deltacalc.calc.you_to_opponent"), safeLineW, textScale)
+            UIUtils.drawText(context, safeYouToOpp, (cellX + 6).toFloat(), textY.toFloat(), V2_ACCENT_GREEN, textScale)
             textY += s(9)
-            // Bar under YOUR moves shows OPPONENT's HP (the side taking the hit).
             model.yourMoves.take(4).forEach { row ->
-                drawMoveRow(context, cellX + 6, textY.toFloat(), row, if (row.emphasized) V2_ACCENT_YELLOW else V2_TEXT, textScale, uiScale, compact, opponentHpPct)
+                drawMoveRow(context, cellX + 6, textY.toFloat(), row, if (row.emphasized) V2_ACCENT_YELLOW else V2_TEXT, textScale, uiScale, moveRowAvailableWidth, opponentHpPct)
                 textY += rowH
             }
 
             textY += s(2)
-            UIUtils.drawText(context, "OPPONENT \u2192 YOU", (cellX + 6).toFloat(), textY.toFloat(), UIUtils.color(252, 129, 129), textScale)
+            val safeOppToYou = truncateToWidth(tr("deltacalc.calc.opponent_to_you"), safeLineW, textScale)
+            UIUtils.drawText(context, safeOppToYou, (cellX + 6).toFloat(), textY.toFloat(), UIUtils.color(252, 129, 129), textScale)
             textY += s(9)
-            // Bar under OPP's moves shows YOUR HP (the side taking the hit).
             model.opponentMoves.take(4).forEach { row ->
-                drawMoveRow(context, cellX + 6, textY.toFloat(), row, V2_TEXT, textScale, uiScale, compact, playerHpPct)
+                drawMoveRow(context, cellX + 6, textY.toFloat(), row, V2_TEXT, textScale, uiScale, moveRowAvailableWidth, playerHpPct)
                 textY += rowH
             }
         } else {
-            UIUtils.drawText(context, "Tap to expand", (cellX + 6).toFloat(), textY.toFloat() + s(8), UIUtils.color(140, 150, 165), textScale)
+            val safeTap = truncateToWidth(tr("deltacalc.calc.tap_to_expand"), safeLineW, textScale)
+            UIUtils.drawText(context, safeTap, (cellX + 6).toFloat(), textY.toFloat() + s(8), UIUtils.color(140, 150, 165), textScale)
             textY += s(16)
         }
 
-        // ─── Team roster at the bottom ─────────────────────────────────────
         textY += s(2)
         UIUtils.drawPopupRowDivider(context, cellX, cellW, textY)
         textY += s(3)
-        val teamHeader = if (CalcPanelState.teamSectionCollapsed) "[+] TEAM" else "[-] TEAM"
-        UIUtils.drawText(context, teamHeader, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_LABEL, textScale)
-        lastTeamHeaderBounds = intArrayOf(cellX, (textY - 2) - scrollOffset, cellW, s(11).coerceAtLeast(8))
+
+        val teamChevron = if (CalcPanelState.teamSectionCollapsed) "\u25B8" else "\u25BE"
+        val teamHeader = "$teamChevron " + tr("deltacalc.calc.team")
+        val safeTeamHeader = truncateToWidth(teamHeader, safeLineW, textScale)
+        UIUtils.drawText(context, safeTeamHeader, (cellX + 6).toFloat(), textY.toFloat(), V2_TEXT_LABEL, textScale)
+        lastTeamHeaderBounds = CalcHitBounds(cellX, (textY - 2) - scrollOffset, cellW, s(11).coerceAtLeast(8))
         textY += s(10)
 
         if (!CalcPanelState.teamSectionCollapsed) {
@@ -379,7 +708,9 @@ object DamageCalcPanel {
         context.matrices.pop()
         lastContentHeight = textY - contentStartY
 
-        // Right-edge scrollbar; ScrollbarRenderer no-ops when content fits.
+        // Right-edge scrollbar with active hover feedback
+        val scrollableContent = lastContentHeight > viewportHeight
+        val isThumbHovered = isScrollbarDragging || (scrollableContent && contentScrollbar.isOverThumb(mouseX, mouseY))
         contentScrollbar.render(
             context = context,
             x = cellX + cellW - 4,
@@ -387,15 +718,14 @@ object DamageCalcPanel {
             height = viewportHeight,
             contentHeight = lastContentHeight,
             visibleHeight = viewportHeight,
-            scrollOffset = scrollOffset
+            scrollOffset = scrollOffset,
+            isHovered = isThumbHovered
         )
 
         drawResizeHandle(context, x, y, width, height)
     }
 
     fun onScroll(mouseX: Double, mouseY: Double, deltaY: Double): Boolean {
-        // The mixin hands us raw window-pixel coords; convert to scaled GUI
-        // coords so the bounds check matches lastBounds (which is already scaled).
         val mc = MinecraftClient.getInstance()
         val scaledX = (mouseX * mc.window.scaledWidth / mc.window.width).toInt()
         val scaledY = (mouseY * mc.window.scaledHeight / mc.window.height).toInt()
@@ -412,11 +742,10 @@ object DamageCalcPanel {
             return true
         }
 
-        // No-Ctrl wheel scrolls the moves+team viewport when there's overflow.
         val viewportHeight = (lastContentViewportBottom - lastContentViewportTop).coerceAtLeast(0)
         val maxScroll = (lastContentHeight - viewportHeight).coerceAtLeast(0)
-        if (maxScroll <= 0) return false  // nothing to scroll, let other widgets handle
-        val step = (12 * deltaY).toInt()  // 12px per wheel tick; deltaY > 0 = scroll up
+        if (maxScroll <= 0) return false
+        val step = (12 * deltaY).toInt()
         contentScrollOffset = (contentScrollOffset - step).coerceIn(0, maxScroll)
         return true
     }
@@ -427,16 +756,19 @@ object DamageCalcPanel {
         val mouseDown = GLFW.glfwGetMouseButton(mc.window.handle, GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS
         val rightDown = GLFW.glfwGetMouseButton(mc.window.handle, GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS
         val canInteract = UIUtils.canInteract(UIUtils.ActivePanel.DAMAGE_CALC)
-        val summaryBounds = lastSummaryBounds
 
-        // Right-click on a row resets that row's override. Rising-edge only.
+        // Live hover update for resize handle
+        val resizeZone = UIUtils.getResizeZone(mouseX, mouseY, x, y, width, height, RESIZE_HANDLE)
+        interaction.hoveredZone = resizeZone
+
+        // Right-click legacy alias for reset
         if (rightDown && !wasRightMouseDown && canInteract) {
             val opponentUuid = model.selectedOpponentUuid
             if (opponentUuid != null && CalcPanelState.expanded && CalcPanelState.summaryExpanded) {
                 val resetRow = when {
-                    contains(mouseX, mouseY, lastItemRowBounds[0], lastItemRowBounds[1], lastItemRowBounds[2], lastItemRowBounds[3]) -> OverrideRow.ITEM
-                    contains(mouseX, mouseY, lastAbilityRowBounds[0], lastAbilityRowBounds[1], lastAbilityRowBounds[2], lastAbilityRowBounds[3]) -> OverrideRow.ABILITY
-                    contains(mouseX, mouseY, lastSpreadRowBounds[0], lastSpreadRowBounds[1], lastSpreadRowBounds[2], lastSpreadRowBounds[3]) -> OverrideRow.SPREAD
+                    lastItemBodyBounds.contains(mouseX, mouseY) || lastItemPrevBounds.contains(mouseX, mouseY) || lastItemNextBounds.contains(mouseX, mouseY) || lastItemResetBounds.contains(mouseX, mouseY) -> OverrideRow.ITEM
+                    lastAbilityBodyBounds.contains(mouseX, mouseY) || lastAbilityPrevBounds.contains(mouseX, mouseY) || lastAbilityNextBounds.contains(mouseX, mouseY) || lastAbilityResetBounds.contains(mouseX, mouseY) -> OverrideRow.ABILITY
+                    lastSpreadBodyBounds.contains(mouseX, mouseY) || lastSpreadPrevBounds.contains(mouseX, mouseY) || lastSpreadNextBounds.contains(mouseX, mouseY) || lastSpreadResetBounds.contains(mouseX, mouseY) -> OverrideRow.SPREAD
                     else -> null
                 }
                 resetRow?.let { CalcComputationService.resetOverride(opponentUuid, it) }
@@ -450,7 +782,7 @@ object DamageCalcPanel {
                     summaryClickArmed = false
                     pendingTabSelection = null
                     pendingSectionToggle = null
-                    pendingOverrideClick = null
+                    armedOverride = null
                     val viewportHeight = (lastContentViewportBottom - lastContentViewportTop).coerceAtLeast(0)
                     contentScrollOffset = contentScrollbar.dragToScrollOffset(
                         dragDeltaY = mouseY - scrollDragStartMouseY,
@@ -463,7 +795,7 @@ object DamageCalcPanel {
                     summaryClickArmed = false
                     pendingTabSelection = null
                     pendingSectionToggle = null
-                    pendingOverrideClick = null
+                    armedOverride = null
                     interaction.updateDrag(mouseX, mouseY, mc.window.scaledWidth, mc.window.scaledHeight, width, height)?.let { (nextX, nextY) ->
                         CalcPanelState.setPosition(nextX, nextY)
                     }
@@ -472,14 +804,14 @@ object DamageCalcPanel {
                     summaryClickArmed = false
                     pendingTabSelection = null
                     pendingSectionToggle = null
-                    pendingOverrideClick = null
+                    armedOverride = null
                     val result = interaction.calculateResize(
                         mouseX = mouseX,
                         mouseY = mouseY,
                         minWidth = 180,
-                        maxWidth = (mc.window.scaledWidth * 0.65f).toInt(),
+                        maxWidth = minOf(mc.window.scaledWidth, maxOf(180, (mc.window.scaledWidth * 0.65f).toInt())),
                         minHeight = COLLAPSED_HEIGHT,
-                        maxHeight = (mc.window.scaledHeight * 0.8f).toInt(),
+                        maxHeight = minOf(mc.window.scaledHeight, maxOf(COLLAPSED_HEIGHT, (mc.window.scaledHeight * 0.8f).toInt())),
                         screenWidth = mc.window.scaledWidth,
                         screenHeight = mc.window.scaledHeight
                     )
@@ -487,28 +819,26 @@ object DamageCalcPanel {
                     CalcPanelState.setDimensions(result.newWidth, result.newHeight)
                 }
                 !wasMouseDown && canInteract -> {
-                    val resizeZone = UIUtils.getResizeZone(mouseX, mouseY, x, y, width, height, RESIZE_HANDLE)
                     val clickedPlayerTab = findTabAt(mouseX, mouseY, lastPlayerTabBounds)
                     val clickedOpponentTab = findTabAt(mouseX, mouseY, lastOpponentTabBounds)
                     val rowsClickable = CalcPanelState.expanded && CalcPanelState.summaryExpanded
                     val viewportHeight = (lastContentViewportBottom - lastContentViewportTop).coerceAtLeast(0)
                     val scrollableContent = lastContentHeight > viewportHeight
+                    val armed = if (rowsClickable) checkOverrideHit(mouseX, mouseY) else null
+
                     if (scrollableContent && contentScrollbar.isOverThumb(mouseX, mouseY)) {
-                        // Begin thumb drag.
                         summaryClickArmed = false
                         pendingTabSelection = null
                         pendingSectionToggle = null
-                        pendingOverrideClick = null
+                        armedOverride = null
                         isScrollbarDragging = true
                         scrollDragStartMouseY = mouseY
                         scrollDragStartOffset = contentScrollOffset
                     } else if (scrollableContent && contentScrollbar.isOverTrack(mouseX, mouseY)) {
-                        // Click empty track: jump to that position, then keep
-                        // dragging so the user can fine-tune without releasing.
                         summaryClickArmed = false
                         pendingTabSelection = null
                         pendingSectionToggle = null
-                        pendingOverrideClick = null
+                        armedOverride = null
                         contentScrollOffset = contentScrollbar.trackClickToScrollOffset(
                             mouseY = mouseY,
                             contentHeight = lastContentHeight,
@@ -521,68 +851,43 @@ object DamageCalcPanel {
                         summaryClickArmed = false
                         pendingTabSelection = null
                         pendingSectionToggle = null
-                        pendingOverrideClick = null
+                        armedOverride = null
                         interaction.startResize(mouseX, mouseY, resizeZone, x, y, width, height)
-                    } else if (contains(mouseX, mouseY, lastTeamHeaderBounds[0], lastTeamHeaderBounds[1], lastTeamHeaderBounds[2], lastTeamHeaderBounds[3])) {
+                    } else if (lastTeamHeaderBounds.contains(mouseX, mouseY)) {
                         summaryClickArmed = false
                         pendingTabSelection = null
-                        pendingOverrideClick = null
+                        armedOverride = null
                         pendingSectionToggle = SectionToggle.TEAM
-                    } else if (contains(mouseX, mouseY, lastMovesHeaderBounds[0], lastMovesHeaderBounds[1], lastMovesHeaderBounds[2], lastMovesHeaderBounds[3])) {
+                    } else if (lastMovesHeaderBounds.contains(mouseX, mouseY)) {
                         summaryClickArmed = false
                         pendingTabSelection = null
-                        pendingOverrideClick = null
+                        armedOverride = null
                         pendingSectionToggle = SectionToggle.MOVES
                     } else if (clickedPlayerTab != null && !clickedPlayerTab.disabled) {
                         summaryClickArmed = false
                         pendingSectionToggle = null
-                        pendingOverrideClick = null
+                        armedOverride = null
                         pendingTabSelection = PendingTabSelection(clickedPlayerTab.uuid, isPlayerSide = true)
                     } else if (clickedOpponentTab != null && !clickedOpponentTab.disabled) {
                         summaryClickArmed = false
                         pendingSectionToggle = null
-                        pendingOverrideClick = null
+                        armedOverride = null
                         pendingTabSelection = PendingTabSelection(clickedOpponentTab.uuid, isPlayerSide = false)
                     } else if (contains(mouseX, mouseY, x + UIUtils.FRAME_INSET, y + UIUtils.FRAME_INSET, width - UIUtils.FRAME_INSET * 2, HEADER_HEIGHT)) {
                         summaryClickArmed = false
                         pendingSectionToggle = null
                         pendingTabSelection = null
-                        pendingOverrideClick = null
+                        armedOverride = null
                         interaction.startDrag(mouseX, mouseY, x, y)
-                    } else if (rowsClickable && contains(mouseX, mouseY, lastItemBackBounds[0], lastItemBackBounds[1], lastItemBackBounds[2], lastItemBackBounds[3])) {
+                    } else if (armed != null) {
                         summaryClickArmed = false
                         pendingTabSelection = null
                         pendingSectionToggle = null
-                        pendingOverrideClick = PendingOverrideClick(OverrideRow.ITEM, -1)
-                    } else if (rowsClickable && contains(mouseX, mouseY, lastAbilityBackBounds[0], lastAbilityBackBounds[1], lastAbilityBackBounds[2], lastAbilityBackBounds[3])) {
-                        summaryClickArmed = false
+                        armedOverride = armed
+                    } else if (CalcPanelState.expanded && lastSummaryBounds.contains(mouseX, mouseY)) {
                         pendingTabSelection = null
                         pendingSectionToggle = null
-                        pendingOverrideClick = PendingOverrideClick(OverrideRow.ABILITY, -1)
-                    } else if (rowsClickable && contains(mouseX, mouseY, lastSpreadBackBounds[0], lastSpreadBackBounds[1], lastSpreadBackBounds[2], lastSpreadBackBounds[3])) {
-                        summaryClickArmed = false
-                        pendingTabSelection = null
-                        pendingSectionToggle = null
-                        pendingOverrideClick = PendingOverrideClick(OverrideRow.SPREAD, -1)
-                    } else if (rowsClickable && contains(mouseX, mouseY, lastItemRowBounds[0], lastItemRowBounds[1], lastItemRowBounds[2], lastItemRowBounds[3])) {
-                        summaryClickArmed = false
-                        pendingTabSelection = null
-                        pendingSectionToggle = null
-                        pendingOverrideClick = PendingOverrideClick(OverrideRow.ITEM, 1)
-                    } else if (rowsClickable && contains(mouseX, mouseY, lastAbilityRowBounds[0], lastAbilityRowBounds[1], lastAbilityRowBounds[2], lastAbilityRowBounds[3])) {
-                        summaryClickArmed = false
-                        pendingTabSelection = null
-                        pendingSectionToggle = null
-                        pendingOverrideClick = PendingOverrideClick(OverrideRow.ABILITY, 1)
-                    } else if (rowsClickable && contains(mouseX, mouseY, lastSpreadRowBounds[0], lastSpreadRowBounds[1], lastSpreadRowBounds[2], lastSpreadRowBounds[3])) {
-                        summaryClickArmed = false
-                        pendingTabSelection = null
-                        pendingSectionToggle = null
-                        pendingOverrideClick = PendingOverrideClick(OverrideRow.SPREAD, 1)
-                    } else if (CalcPanelState.expanded && contains(mouseX, mouseY, summaryBounds[0], summaryBounds[1], summaryBounds[2], summaryBounds[3])) {
-                        pendingTabSelection = null
-                        pendingSectionToggle = null
-                        pendingOverrideClick = null
+                        armedOverride = null
                         summaryClickArmed = true
                     }
                 }
@@ -595,7 +900,7 @@ object DamageCalcPanel {
                 summaryClickArmed = false
                 pendingTabSelection = null
                 pendingSectionToggle = null
-                pendingOverrideClick = null
+                armedOverride = null
                 val didDrag = interaction.endDrag()
                 if (!didDrag && contains(mouseX, mouseY, x + UIUtils.FRAME_INSET, y + UIUtils.FRAME_INSET, width - UIUtils.FRAME_INSET * 2, HEADER_HEIGHT)) {
                     CalcPanelState.toggleExpanded()
@@ -605,37 +910,30 @@ object DamageCalcPanel {
                 summaryClickArmed = false
                 pendingTabSelection = null
                 pendingSectionToggle = null
-                pendingOverrideClick = null
+                armedOverride = null
                 interaction.endResize()
                 CalcPanelState.save()
-            } else if (pendingOverrideClick != null) {
-                val pending = pendingOverrideClick!!
-                val (rowBounds, backBounds) = when (pending.row) {
-                    OverrideRow.ITEM -> lastItemRowBounds to lastItemBackBounds
-                    OverrideRow.ABILITY -> lastAbilityRowBounds to lastAbilityBackBounds
-                    OverrideRow.SPREAD -> lastSpreadRowBounds to lastSpreadBackBounds
-                }
-                val targetBounds = if (pending.direction < 0) backBounds else rowBounds
+            } else if (armedOverride != null) {
+                val armed = armedOverride!!
                 val opponentUuid = model.selectedOpponentUuid
-                if (opponentUuid != null && contains(mouseX, mouseY, targetBounds[0], targetBounds[1], targetBounds[2], targetBounds[3])) {
-                    when (pending.row) {
-                        OverrideRow.ITEM -> CalcComputationService.cycleItem(opponentUuid, model.opponentSet.itemAlternatives.size, pending.direction)
-                        OverrideRow.ABILITY -> CalcComputationService.cycleAbility(opponentUuid, model.opponentSet.abilityAlternatives.size, pending.direction)
-                        OverrideRow.SPREAD -> CalcComputationService.cycleSpread(opponentUuid, model.opponentSet.spreadAlternatives.size, pending.direction)
+                if (opponentUuid != null && isArmedOverrideStillInside(armed, mouseX, mouseY)) {
+                    when (armed.action) {
+                        OverrideAction.RESET -> CalcComputationService.resetOverride(opponentUuid, armed.row)
+                        OverrideAction.PREV -> cycleRow(opponentUuid, armed.row, -1, model)
+                        OverrideAction.NEXT -> cycleRow(opponentUuid, armed.row, 1, model)
                     }
                 }
-                pendingOverrideClick = null
+                armedOverride = null
             } else if (pendingSectionToggle != null) {
-                val stillInside = when (pendingSectionToggle) {
-                    SectionToggle.TEAM -> contains(mouseX, mouseY, lastTeamHeaderBounds[0], lastTeamHeaderBounds[1], lastTeamHeaderBounds[2], lastTeamHeaderBounds[3])
-                    SectionToggle.MOVES -> contains(mouseX, mouseY, lastMovesHeaderBounds[0], lastMovesHeaderBounds[1], lastMovesHeaderBounds[2], lastMovesHeaderBounds[3])
-                    null -> false
+                val toggle = pendingSectionToggle!!
+                val stillInside = when (toggle) {
+                    SectionToggle.TEAM -> lastTeamHeaderBounds.contains(mouseX, mouseY)
+                    SectionToggle.MOVES -> lastMovesHeaderBounds.contains(mouseX, mouseY)
                 }
                 if (stillInside) {
-                    when (pendingSectionToggle) {
+                    when (toggle) {
                         SectionToggle.TEAM -> CalcPanelState.toggleTeamSectionCollapsed()
                         SectionToggle.MOVES -> CalcPanelState.toggleMovesSectionCollapsed()
-                        null -> Unit
                     }
                     CalcPanelState.save()
                 }
@@ -652,7 +950,7 @@ object DamageCalcPanel {
                 }
                 pendingTabSelection = null
             } else if (summaryClickArmed) {
-                if (CalcPanelState.expanded && contains(mouseX, mouseY, summaryBounds[0], summaryBounds[1], summaryBounds[2], summaryBounds[3])) {
+                if (CalcPanelState.expanded && lastSummaryBounds.contains(mouseX, mouseY)) {
                     CalcPanelState.toggleSummaryExpanded()
                     CalcPanelState.save()
                 }
@@ -661,6 +959,56 @@ object DamageCalcPanel {
         }
 
         wasMouseDown = mouseDown
+    }
+
+    private fun checkOverrideHit(mouseX: Int, mouseY: Int): ArmedOverride? {
+        // ITEM
+        if (lastItemResetBounds.contains(mouseX, mouseY)) return ArmedOverride(OverrideRow.ITEM, OverrideAction.RESET)
+        if (lastItemPrevBounds.contains(mouseX, mouseY)) return ArmedOverride(OverrideRow.ITEM, OverrideAction.PREV)
+        if (lastItemNextBounds.contains(mouseX, mouseY)) return ArmedOverride(OverrideRow.ITEM, OverrideAction.NEXT)
+        if (lastItemBodyBounds.contains(mouseX, mouseY)) return ArmedOverride(OverrideRow.ITEM, OverrideAction.NEXT)
+
+        // ABILITY
+        if (lastAbilityResetBounds.contains(mouseX, mouseY)) return ArmedOverride(OverrideRow.ABILITY, OverrideAction.RESET)
+        if (lastAbilityPrevBounds.contains(mouseX, mouseY)) return ArmedOverride(OverrideRow.ABILITY, OverrideAction.PREV)
+        if (lastAbilityNextBounds.contains(mouseX, mouseY)) return ArmedOverride(OverrideRow.ABILITY, OverrideAction.NEXT)
+        if (lastAbilityBodyBounds.contains(mouseX, mouseY)) return ArmedOverride(OverrideRow.ABILITY, OverrideAction.NEXT)
+
+        // SPREAD
+        if (lastSpreadResetBounds.contains(mouseX, mouseY)) return ArmedOverride(OverrideRow.SPREAD, OverrideAction.RESET)
+        if (lastSpreadPrevBounds.contains(mouseX, mouseY)) return ArmedOverride(OverrideRow.SPREAD, OverrideAction.PREV)
+        if (lastSpreadNextBounds.contains(mouseX, mouseY)) return ArmedOverride(OverrideRow.SPREAD, OverrideAction.NEXT)
+        if (lastSpreadBodyBounds.contains(mouseX, mouseY)) return ArmedOverride(OverrideRow.SPREAD, OverrideAction.NEXT)
+
+        return null
+    }
+
+    private fun isArmedOverrideStillInside(armed: ArmedOverride, mouseX: Int, mouseY: Int): Boolean {
+        return when (armed.row) {
+            OverrideRow.ITEM -> when (armed.action) {
+                OverrideAction.RESET -> lastItemResetBounds.contains(mouseX, mouseY)
+                OverrideAction.PREV -> lastItemPrevBounds.contains(mouseX, mouseY)
+                OverrideAction.NEXT -> lastItemNextBounds.contains(mouseX, mouseY) || lastItemBodyBounds.contains(mouseX, mouseY)
+            }
+            OverrideRow.ABILITY -> when (armed.action) {
+                OverrideAction.RESET -> lastAbilityResetBounds.contains(mouseX, mouseY)
+                OverrideAction.PREV -> lastAbilityPrevBounds.contains(mouseX, mouseY)
+                OverrideAction.NEXT -> lastAbilityNextBounds.contains(mouseX, mouseY) || lastAbilityBodyBounds.contains(mouseX, mouseY)
+            }
+            OverrideRow.SPREAD -> when (armed.action) {
+                OverrideAction.RESET -> lastSpreadResetBounds.contains(mouseX, mouseY)
+                OverrideAction.PREV -> lastSpreadPrevBounds.contains(mouseX, mouseY)
+                OverrideAction.NEXT -> lastSpreadNextBounds.contains(mouseX, mouseY) || lastSpreadBodyBounds.contains(mouseX, mouseY)
+            }
+        }
+    }
+
+    private fun cycleRow(uuid: UUID, row: OverrideRow, direction: Int, model: CalcRenderModel) {
+        when (row) {
+            OverrideRow.ITEM -> CalcComputationService.cycleItem(uuid, model.opponentSet.itemAlternatives.size, direction)
+            OverrideRow.ABILITY -> CalcComputationService.cycleAbility(uuid, model.opponentSet.abilityAlternatives.size, direction)
+            OverrideRow.SPREAD -> CalcComputationService.cycleSpread(uuid, model.opponentSet.spreadAlternatives.size, direction)
+        }
     }
 
     private fun drawTabs(
@@ -706,7 +1054,6 @@ object DamageCalcPanel {
             context.fill(x, y, x + tabWidth, y + tabH, background)
             context.fill(x, y, x + tabWidth, y + 1, accent)
 
-            // HP fill bar at bottom.
             val hp = hpByUuid[tab.uuid]
             if (hp != null) {
                 val max = hp.second.coerceAtLeast(1)
@@ -730,7 +1077,7 @@ object DamageCalcPanel {
                 if (tab.isActive) append("*")
                 append(tab.label)
             }
-            val fitted = truncate(rawLabel, (tabWidth - 6).coerceAtLeast(10), tabTextScale)
+            val fitted = truncateToWidth(rawLabel, (tabWidth - 6).coerceAtLeast(6), tabTextScale)
             UIUtils.drawText(
                 context,
                 fitted,
@@ -739,7 +1086,6 @@ object DamageCalcPanel {
                 if (tab.isDisabled) V2_TEXT_LABEL else V2_TEXT,
                 tabTextScale
             )
-            // Strikethrough fainted.
             if (tab.isDisabled) {
                 val strikeY = y + (tabH / 2)
                 context.fill(x + 2, strikeY, x + tabWidth - 2, strikeY + 1, UIUtils.color(200, 120, 120, 200))
@@ -761,62 +1107,99 @@ object DamageCalcPanel {
     }
 
     private fun tabColumns(tabCount: Int, availableWidth: Int): Int {
-        // Prefer to fit all tabs on one row. Only wrap if individual tabs would
-        // be narrower than minTabWidth (unreadable).
         val minTabWidth = 22
         val maxByWidth = ((availableWidth + TAB_GAP) / (minTabWidth + TAB_GAP)).coerceAtLeast(1)
         return tabCount.coerceAtMost(maxByWidth).coerceAtLeast(1)
     }
 
-    private fun drawMoveRow(context: DrawContext, x: Int, y: Float, row: CalcMoveRow, color: Int, scale: Float, uiScale: Float, compact: Boolean, defenderHpPct: Int) {
-        val sevBar = severityBar(row)
-        val sevFg = severityFg(row)
+    private fun drawMoveRow(
+        context: DrawContext,
+        startX: Int,
+        y: Float,
+        row: CalcMoveRow,
+        color: Int,
+        scale: Float,
+        uiScale: Float,
+        availableWidth: Int,
+        defenderHpPct: Int
+    ) {
+        val presentation = CalcPresentation.styleForOutcome(row.outcome, row.supported)
+        val confStyle = CalcPresentation.styleForConfidence(row.confidence, row.supported && row.outcome != CalcMoveOutcome.UNSUPPORTED)
         val yInt = y.toInt()
-        val barYOffset = (7 * uiScale).roundToInt().coerceAtLeast(3)
-        val barWidth = (78 * uiScale).roundToInt().coerceAtLeast(20)
+        fun s(n: Int): Int = (n * uiScale).roundToInt().coerceAtLeast(1)
+        val rowHeight = s(10).coerceAtLeast(6)
 
-        UIUtils.drawText(context, row.moveName, x.toFloat(), y, color, scale)
-        UIUtils.drawText(context, row.damageText, x + 84f * uiScale, y, V2_TEXT_DIM, scale)
-        UIUtils.drawText(context, row.koText, x + 144f * uiScale, y, sevFg, scale)
-
-        // Damage-vs-HP bar under the name (skip status / missing data). Always shown so
-        // it works regardless of compact mode; compact just affects surrounding sections.
-        if (!row.isStatus && row.minPercent != null && row.maxPercent != null) {
-            drawDamageBar(context, x, yInt + barYOffset, barWidth, row.minPercent, row.maxPercent, defenderHpPct, sevBar, uiScale)
+        // 1px left rail for confidence / unsupported state
+        if (confStyle.showRail) {
+            context.fill(startX - 2, yInt, startX - 1, yInt + rowHeight, confStyle.railColor)
         }
-    }
 
-    private fun severityFg(row: CalcMoveRow): Int {
-        if (row.isStatus) return SEV_STATUS_FG
-        val ko = row.koText.uppercase()
-        return when {
-            "OHKO" in ko -> SEV_OHKO_FG
-            "2HKO" in ko -> SEV_2HKO_FG
-            "3HKO" in ko -> SEV_3HKO_FG
-            else -> SEV_WEAK_FG
+        val trFont = MinecraftClient.getInstance().textRenderer
+        val measuredKo = ceil(trFont.getWidth(row.koText) * scale).toInt()
+        val measuredDamage = ceil(trFont.getWidth(row.damageText) * scale).toInt()
+
+        val layout = CalcMoveRowLayout.calculate(
+            availableWidth = availableWidth,
+            measuredDamageWidth = measuredDamage,
+            measuredKoWidth = measuredKo
+        )
+
+        val moveTextColor = if (confStyle.isErrorLike) UIUtils.color(160, 112, 112) else color
+
+        // Truncate move name to allocated region
+        if (layout.moveNameWidth > 0) {
+            val safeName = truncateToWidth(row.moveName, layout.moveNameWidth, scale)
+            if (safeName.isNotEmpty()) {
+                UIUtils.drawText(context, safeName, (startX + layout.moveNameX).toFloat(), y, moveTextColor, scale)
+            }
         }
-    }
 
-    private fun severityBar(row: CalcMoveRow): Int {
-        if (row.isStatus) return SEV_STATUS_BAR
-        val ko = row.koText.uppercase()
-        return when {
-            "OHKO" in ko -> SEV_OHKO_BAR
-            "2HKO" in ko -> SEV_2HKO_BAR
-            "3HKO" in ko -> SEV_3HKO_BAR
-            else -> SEV_WEAK_BAR
+        // Truncate damage text to allocated region
+        if (layout.damageVisible && layout.damageWidth > 0) {
+            val safeDamage = truncateToWidth(row.damageText, layout.damageWidth, scale)
+            if (safeDamage.isNotEmpty()) {
+                UIUtils.drawText(context, safeDamage, (startX + layout.damageX).toFloat(), y, V2_TEXT_DIM, scale)
+            }
+        }
+
+        // Truncate KO text to allocated region
+        if (layout.koVisible && layout.koWidth > 0) {
+            val safeKo = truncateToWidth(row.koText, layout.koWidth, scale)
+            if (safeKo.isNotEmpty()) {
+                UIUtils.drawText(context, safeKo, (startX + layout.koX).toFloat(), y, presentation.labelColor, scale)
+            }
+        }
+
+        // Damage-vs-HP bar under the name (never for STATUS or UNSUPPORTED)
+        if (presentation.showDamageBar && row.minPercent != null && row.maxPercent != null) {
+            val barYOffset = (7 * uiScale).roundToInt().coerceAtLeast(3)
+            val desiredBarWidth = (78 * uiScale).roundToInt().coerceAtLeast(20)
+            val barWidth = minOf(desiredBarWidth, availableWidth)
+            if (barWidth >= 4) {
+                drawDamageBar(
+                    context = context,
+                    x = startX,
+                    y = yInt + barYOffset,
+                    w = barWidth,
+                    minDmgPct = row.minPercent,
+                    maxDmgPct = row.maxPercent,
+                    defenderHpPct = defenderHpPct,
+                    presentation = presentation,
+                    uiScale = uiScale
+                )
+            }
         }
     }
 
     /**
-     * Damage-vs-HP bar: shows how much of the defender's HP the move will take.
-     *   [ green: guaranteed remaining ][ severity: HP at risk ][ empty: pre-existing damage ]
-     * Full width represents the defender's max HP.
+     * Damage-vs-HP bar: shows guaranteed remaining HP and risk zone.
+     * Guaranteed OHKO uses solid red; Likely OHKO uses an alternating hatched risk fill.
      */
     private fun drawDamageBar(
         context: DrawContext, x: Int, y: Int, w: Int,
         minDmgPct: Double, maxDmgPct: Double,
-        defenderHpPct: Int, sevColor: Int,
+        defenderHpPct: Int,
+        presentation: CalcOutcomePresentation,
         uiScale: Float = 1.0f
     ) {
         val width = w.coerceAtLeast(4)
@@ -837,12 +1220,29 @@ object DamageCalcPanel {
             }
             context.fill(x, y, x + greenEnd, y + h, hpCol)
         }
-        // HP at risk (severity color, slightly dimmed so it reads as "damage zone" not solid).
+
+        // HP at risk (severity color, slightly dimmed so it reads as "damage zone").
         if (currentEnd > greenEnd) {
+            val sevColor = presentation.barColor
             val dimmed = (sevColor and 0x00FFFFFF) or (0xC0 shl 24)
-            context.fill(x + greenEnd, y, x + currentEnd, y + h, dimmed)
+            if (presentation.fillStyle == CalcRiskFillStyle.HATCHED) {
+                val startRiskX = x + greenEnd
+                val endRiskX = x + currentEnd
+                val hatchBg = (sevColor and 0x00FFFFFF) or (0x40 shl 24)
+                var stripeX = startRiskX
+                while (stripeX < endRiskX) {
+                    val stripeW = minOf(2, endRiskX - stripeX)
+                    val isEven = ((stripeX - startRiskX) / 2) % 2 == 0
+                    val stripeCol = if (isEven) dimmed else hatchBg
+                    context.fill(stripeX, y, stripeX + stripeW, y + h, stripeCol)
+                    stripeX += stripeW
+                }
+            } else {
+                context.fill(x + greenEnd, y, x + currentEnd, y + h, dimmed)
+            }
         }
-        // 100% tick at right edge (shows full-HP benchmark when defender is at full).
+
+        // 100% benchmark tick at right edge
         if (defenderHpPct >= 99) {
             context.fill(x + width - 1, y - 1, x + width, y + h, UIUtils.color(255, 255, 255, 64))
         }
@@ -878,32 +1278,55 @@ object DamageCalcPanel {
         val youPct = hpPercent(player)
         val oppPct = hpPercent(opponent)
         val (arrow, arrowColor) = speedArrow(speedText)
+        val trFont = MinecraftClient.getInstance().textRenderer
+
         if (compact) {
-            val youLabel = "You ${youPct}%"
-            val oppLabel = "Opp ${oppPct}%"
-            val youW = (MinecraftClient.getInstance().textRenderer.getWidth(youLabel) * textScale).toInt()
-            UIUtils.drawText(context, youLabel, (cellX + 6).toFloat(), (y + 1).toFloat(), V2_TEXT, textScale)
-            UIUtils.drawText(context, arrow, (cellX + 6 + youW + s(4)).toFloat(), (y + 1).toFloat(), arrowColor, textScale)
-            val arrowW = (MinecraftClient.getInstance().textRenderer.getWidth(arrow) * textScale).toInt()
-            UIUtils.drawText(context, oppLabel, (cellX + 6 + youW + s(4) + arrowW + s(4)).toFloat(), (y + 1).toFloat(), V2_TEXT, textScale)
+            val compactAvailableW = maxOf(0, cellW - 12)
+            val measurer = { text: String -> (trFont.getWidth(text) * textScale).toInt() }
+            val compactMatchup = CalcCompactMatchupLayout.calculate(
+                availableWidth = compactAvailableW,
+                youPct = youPct,
+                oppPct = oppPct,
+                arrow = arrow,
+                measurer = measurer,
+                youWord = tr("deltacalc.calc.matchup.you"),
+                oppWord = tr("deltacalc.calc.matchup.opp"),
+                gap = s(4)
+            )
+
+            if (compactMatchup.youWidth > 0) {
+                val safeYou = truncateToWidth(compactMatchup.youText, compactMatchup.youWidth, textScale)
+                UIUtils.drawText(context, safeYou, (cellX + 6 + compactMatchup.youX).toFloat(), (y + 1).toFloat(), V2_TEXT, textScale)
+            }
+            if (compactMatchup.arrowWidth > 0) {
+                val safeArrow = truncateToWidth(compactMatchup.arrowText, compactMatchup.arrowWidth, textScale)
+                UIUtils.drawText(context, safeArrow, (cellX + 6 + compactMatchup.arrowX).toFloat(), (y + 1).toFloat(), arrowColor, textScale)
+            }
+            if (compactMatchup.oppWidth > 0) {
+                val safeOpp = truncateToWidth(compactMatchup.oppText, compactMatchup.oppWidth, textScale)
+                UIUtils.drawText(context, safeOpp, (cellX + 6 + compactMatchup.oppX).toFloat(), (y + 1).toFloat(), V2_TEXT, textScale)
+            }
             return y + s(12).coerceAtLeast(7)
         }
+
         val colW = ((cellW - 12 - 3) / 2).coerceAtLeast(40)
         val youX = cellX + 6
         val oppX = cellX + 6 + colW + 3
-        UIUtils.drawText(context, "YOU", youX.toFloat(), y.toFloat(), V2_TEXT_LABEL, textScale)
-        UIUtils.drawText(context, "OPP", oppX.toFloat(), y.toFloat(), V2_TEXT_LABEL, textScale)
-        // Speed arrow centered between the column labels.
-        val arrowW = (MinecraftClient.getInstance().textRenderer.getWidth(arrow) * textScale).toInt()
+        UIUtils.drawText(context, tr("deltacalc.calc.matchup.you_wide"), youX.toFloat(), y.toFloat(), V2_TEXT_LABEL, textScale)
+        UIUtils.drawText(context, tr("deltacalc.calc.matchup.opp_wide"), oppX.toFloat(), y.toFloat(), V2_TEXT_LABEL, textScale)
+
+        val arrowW = (trFont.getWidth(arrow) * textScale).toInt()
         UIUtils.drawText(context, arrow, (cellX + 6 + colW + 3 - (arrowW / 2) - s(2)).toFloat(), y.toFloat(), arrowColor, textScale)
+
         val nameY = y + s(9)
         val nameW = (colW - s(4)).coerceAtLeast(s(20).coerceAtLeast(12))
         player?.let {
-            UIUtils.drawText(context, truncate(it.displayName, nameW, textScale), youX.toFloat(), nameY.toFloat(), V2_TEXT, textScale)
+            UIUtils.drawText(context, truncateToWidth(it.displayName, nameW, textScale), youX.toFloat(), nameY.toFloat(), V2_TEXT, textScale)
         }
         opponent?.let {
-            UIUtils.drawText(context, truncate(it.displayName, nameW, textScale), oppX.toFloat(), nameY.toFloat(), V2_TEXT, textScale)
+            UIUtils.drawText(context, truncateToWidth(it.displayName, nameW, textScale), oppX.toFloat(), nameY.toFloat(), V2_TEXT, textScale)
         }
+
         val hpY = y + s(19)
         val barW = (colW - s(24)).coerceAtLeast(s(20).coerceAtLeast(12))
         drawHpBar(context, youX, hpY, barW, youPct.toDouble(), uiScale)
@@ -914,10 +1337,8 @@ object DamageCalcPanel {
         return y + s(30)
     }
 
-    // Small speed indicator: ">" = you faster, "<" = opp faster, "=" = tie/unknown.
-    // Color: green = confirmed, yellow = likely (inferred), dim gray = tie/unknown.
     private fun speedArrow(speedText: String?): Pair<String, Int> {
-        if (speedText == null) return ">" to V2_TEXT_LABEL  // inconclusive but don't eat space
+        if (speedText == null) return ">" to V2_TEXT_LABEL
         val lc = speedText.lowercase()
         return when {
             "you likely move first" in lc -> ">" to V2_ACCENT_YELLOW
@@ -934,41 +1355,64 @@ object DamageCalcPanel {
         return ((p.currentHp * 100.0) / max).roundToInt().coerceIn(0, 100)
     }
 
-    private fun truncate(s: String, maxW: Int, scale: Float): String {
-        val tr = MinecraftClient.getInstance().textRenderer
-        if ((tr.getWidth(s) * scale) <= maxW) return s
-        var out = s
-        while (out.length > 1 && (tr.getWidth("$out…") * scale) > maxW) {
+    private fun truncateToWidth(text: String, maxScaledWidth: Int, scale: Float): String {
+        if (maxScaledWidth <= 0 || text.isEmpty()) return ""
+        val trFont = MinecraftClient.getInstance().textRenderer
+        if (ceil(trFont.getWidth(text) * scale).toInt() <= maxScaledWidth) return text
+        var out = text
+        while (out.isNotEmpty()) {
+            val candidate = "$out…"
+            if (ceil(trFont.getWidth(candidate) * scale).toInt() <= maxScaledWidth) return candidate
             out = out.substring(0, out.length - 1)
         }
-        return "$out…"
+        return ""
     }
 
-    private fun drawStatePill(context: DrawContext, x: Int, y: Int, state: InferenceValueState, scale: Float, uiScale: Float = 1.0f, isOverride: Boolean = false) {
-        val (bg, fg, label) = when {
-            isOverride -> Triple(PILL_MANUAL_BG, V2_ACCENT_BLUE, "MANUAL")
-            state == InferenceValueState.REVEALED -> Triple(PILL_SEEN_BG, V2_ACCENT_GREEN, "SEEN")
-            state == InferenceValueState.GUESSED -> Triple(PILL_LIKELY_BG, V2_ACCENT_YELLOW, "LIKELY")
-            else -> Triple(PILL_UNK_BG, V2_TEXT_DIM, "?")
+    private fun pillLabel(state: InferenceValueState, isOverride: Boolean): String {
+        return when {
+            isOverride -> tr("deltacalc.calc.pill.manual")
+            state == InferenceValueState.REVEALED -> tr("deltacalc.calc.pill.seen")
+            state == InferenceValueState.GUESSED -> tr("deltacalc.calc.pill.likely")
+            else -> tr("deltacalc.calc.pill.unknown")
         }
+    }
+
+    private fun drawStatePill(
+        context: DrawContext,
+        x: Int,
+        y: Int,
+        state: InferenceValueState,
+        scale: Float,
+        uiScale: Float = 1.0f,
+        isOverride: Boolean = false
+    ) {
+        val (bg, fg) = when {
+            isOverride -> PILL_MANUAL_BG to V2_ACCENT_BLUE
+            state == InferenceValueState.REVEALED -> PILL_SEEN_BG to V2_ACCENT_GREEN
+            state == InferenceValueState.GUESSED -> PILL_LIKELY_BG to V2_ACCENT_YELLOW
+            else -> PILL_UNK_BG to V2_TEXT_DIM
+        }
+        val label = pillLabel(state, isOverride)
         val pillScale = (scale - 0.15f).coerceAtLeast(0.42f)
         val tw = (MinecraftClient.getInstance().textRenderer.getWidth(label) * pillScale).toInt()
-        val padX = (3 * uiScale).roundToInt().coerceAtLeast(1)
+        val padX = CalcPresentation.pillPaddingX(uiScale)
         val padY = (1 * uiScale).roundToInt().coerceAtLeast(1)
-        val pillW = tw + padX * 2
+        val pillW = CalcPresentation.pillTotalWidth(tw, uiScale)
         val pillH = (8 * uiScale).roundToInt().coerceAtLeast(5)
         context.fill(x, y, x + pillW, y + pillH, bg)
         UIUtils.drawText(context, label, (x + padX).toFloat(), (y + padY).toFloat(), fg, pillScale)
     }
 
     private fun drawResizeHandle(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
+        val isHovered = interaction.isResizing || interaction.hoveredZone != UIUtils.ResizeZone.NONE
+        val color = if (isHovered) V2_ACCENT_BLUE else UIUtils.color(120, 140, 160, 255)
         UIUtils.drawCornerHandle(
             context = context,
             cornerX = x + width - 5,
             cornerY = y + height - 5,
             length = 6,
             thickness = 2,
-            color = UIUtils.color(120, 140, 160, 255),
+            color = color,
             bottomRight = true
         )
     }
@@ -978,18 +1422,14 @@ object DamageCalcPanel {
     }
 
     private fun contains(mouseX: Int, mouseY: Int, x: Int, y: Int, width: Int, height: Int): Boolean {
-        return mouseX in x..(x + width) && mouseY in y..(y + height)
+        return CalcPresentation.containsHalfOpen(mouseX, mouseY, x, y, width, height)
     }
 
     private fun formatInference(value: String?): String {
-        // State is shown via pill chip in the render path; label stays plain.
-        return value ?: "Unknown"
+        return value ?: tr("deltacalc.calc.unknown")
     }
 
     private fun normalizeForUsageLookup(value: String?): String {
-        // Mirrors normalizeToken in CalcBattleSnapshot.kt so the renderer can
-        // hit the EffectiveBattleSet's usage % maps without leaking the
-        // internal helper here.
         return value.orEmpty().lowercase()
             .replace(" ", "")
             .replace("-", "")
@@ -998,18 +1438,18 @@ object DamageCalcPanel {
             .replace(".", "")
     }
 
-    private fun buildOverrideRowText(value: String, usagePercent: Double?, overridden: Boolean): String {
+    private fun buildOverrideRowText(value: String, usagePercent: Double?): String {
         val pct = usagePercent?.takeIf { it > 0.0 }?.let { " (${it.roundToInt()}%)" } ?: ""
-        val star = if (overridden) "*" else ""
-        return "$value$pct$star"
+        return "$value$pct"
     }
 
     private fun speedColor(speedText: String): Int {
+        val lc = speedText.lowercase()
         return when {
-            "you move first" in speedText.lowercase() -> UIUtils.color(120, 235, 170)
-            "you likely move first" in speedText.lowercase() -> UIUtils.color(150, 220, 175)
-            "opponent moves first" in speedText.lowercase() -> UIUtils.color(255, 145, 125)
-            "opponent likely moves first" in speedText.lowercase() -> UIUtils.color(245, 175, 120)
+            "you move first" in lc -> UIUtils.color(120, 235, 170)
+            "you likely move first" in lc -> UIUtils.color(150, 220, 175)
+            "opponent moves first" in lc -> UIUtils.color(255, 145, 125)
+            "opponent likely moves first" in lc -> UIUtils.color(245, 175, 120)
             else -> UIUtils.color(220, 205, 120)
         }
     }

@@ -97,12 +97,27 @@ object UpdateChecker {
     private val currentVersionForUserAgent: String
         get() = getCurrentVersion()
 
-    private fun isNewerVersion(latest: String, current: String): Boolean {
-        // Simple semver comparison (handles x.y.z format)
-        val latestParts = latest.removePrefix("v").split(".").mapNotNull { it.toIntOrNull() }
-        val currentParts = current.removePrefix("v").split(".").mapNotNull { it.toIntOrNull() }
+    private val VERSION_REGEX = Regex("""^[vV]?(\d+(?:\.\d+)*)(?:[-+_a-zA-Z\s].*)?$""")
 
-        for (i in 0 until maxOf(latestParts.size, currentParts.size)) {
+    internal fun parseVersionCore(version: String): List<Int>? {
+        val trimmed = version.trim()
+        val match = VERSION_REGEX.matchEntire(trimmed) ?: return null
+        val numericCore = match.groupValues[1]
+        val parts = numericCore.split('.')
+        val result = ArrayList<Int>(parts.size)
+        for (part in parts) {
+            val num = part.toIntOrNull() ?: return null
+            result.add(num)
+        }
+        return result
+    }
+
+    internal fun isNewerVersion(latest: String, current: String): Boolean {
+        val latestParts = parseVersionCore(latest) ?: return false
+        val currentParts = parseVersionCore(current) ?: return false
+
+        val maxLen = maxOf(latestParts.size, currentParts.size)
+        for (i in 0 until maxLen) {
             val l = latestParts.getOrElse(i) { 0 }
             val c = currentParts.getOrElse(i) { 0 }
             if (l > c) return true

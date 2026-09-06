@@ -75,9 +75,16 @@ It provides real-time damage calculations, intelligent opponent set inference, c
 
 ## Controls & Usage
 
-- **Moving the Calc Panel**: Left-click and drag the panel header. Release to dock and save the new position.
-- **Cycling Overrides**: During battle, left-click or right-click the opponent's **Item**, **Ability**, or **Spread** line to cycle through alternative options.
+- **Moving & Collapsing**: Left-click and drag the header to move the panel. Click the header without dragging to collapse/expand.
+- **Resizing**: Drag the resize handle at the bottom-right corner to adjust calculator width and height.
+- **Section Bands**: Click section bands (matchup summary, Move Predictions, Team) to collapse/expand their contents.
+- **Cycling Overrides**: Click a row or the next affordance (`>`) to cycle forward through alternatives. Click the previous affordance (`<`) to cycle back.
+- **Resetting Overrides**: Click the visible reset control (`↺`) to reset a manual override. Right-click reset remains an alias.
+- **Scrolling**: Mouse wheel scrolls overflow content in the move predictions and team sections. Drag the scrollbar thumb or click the track to jump.
+- **Font Scaling**: Hold `Ctrl` + mouse wheel to change the calculator font scale.
 - **Configuring Settings**: Press `Escape` -> `Mods` -> `DeltaCalc` (via Mod Menu) or edit `.minecraft/config/cobblemonextendedbattleui.json`.
+- **Resetting HUD Layout**: If any panel becomes misplaced or moves off-screen, open `Escape` -> `Mods` -> `DeltaCalc`, select the **Layout** category, enable **Reset HUD Layout on Done**, and click **Done**. This one-shot action restores default positions and sizes for the Battle Info Panel, Damage Calculator, Battle Log, and Team Indicators while preserving your feature toggles, font scales, and collapsed states. Clicking **Cancel** leaves your layout unchanged.
+- **Default Layout**: On fresh installs or after a layout reset, the Battle Info Panel defaults to the left side of the screen while the Damage Calculator defaults to the right side, preventing panel overlap.
 
 ---
 

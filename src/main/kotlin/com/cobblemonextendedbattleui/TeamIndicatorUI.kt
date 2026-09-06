@@ -11,6 +11,7 @@ import com.cobblemon.mod.common.pokemon.FormData
 import com.cobblemon.mod.common.pokemon.Pokemon
 import com.cobblemonextendedbattleui.compat.delta.DeltaBattleInfoReader
 import com.cobblemonextendedbattleui.compat.delta.DeltaTeamPreviewEntry
+import com.cobblemonextendedbattleui.pokemon.SafeFormResolver
 import com.cobblemonextendedbattleui.pokemon.render.PokemonModelRenderer
 import com.cobblemonextendedbattleui.pokemon.render.TeamPanelRenderer
 import com.cobblemonextendedbattleui.pokemon.tooltip.MoveInfo
@@ -19,6 +20,7 @@ import com.cobblemonextendedbattleui.pokemon.tooltip.TooltipBoundsData
 import com.cobblemonextendedbattleui.pokemon.tooltip.TooltipConstants
 import com.cobblemonextendedbattleui.pokemon.tooltip.TooltipData
 import com.cobblemonextendedbattleui.pokemon.tooltip.TooltipDataBuilder
+import com.cobblemonextendedbattleui.ui.shared.ResponsiveGeometry
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.util.InputUtil
@@ -44,25 +46,25 @@ import java.util.concurrent.ConcurrentHashMap
 object TeamIndicatorUI {
 
     // Match Cobblemon's exact positioning constants from BattleOverlay.kt
-    private const val HORIZONTAL_INSET = 12
-    private const val VERTICAL_INSET = 10
+    internal const val HORIZONTAL_INSET = 12
+    internal const val VERTICAL_INSET = 10
 
     // Cobblemon tile dimensions (from BattleOverlay companion object)
-    private const val TILE_HEIGHT = 40
-    private const val COMPACT_TILE_HEIGHT = 28
+    internal const val TILE_HEIGHT = 40
+    internal const val COMPACT_TILE_HEIGHT = 28
 
     // Pokemon model indicator settings (base values before scaling)
-    private const val BASE_MODEL_SIZE = 24      // Compact size for indicators
-    private const val BASE_MODEL_SPACING = 3    // Tight spacing between models
-    private const val MODEL_OFFSET_Y = 10       // Gap below the last tile (moves panel down)
+    internal const val BASE_MODEL_SIZE = 24      // Compact size for indicators
+    internal const val BASE_MODEL_SPACING = 3    // Tight spacing between models
+    internal const val MODEL_OFFSET_Y = 10       // Gap below the last tile (moves panel down)
 
     // Computed values based on current scale
-    private val modelSize: Int get() = (BASE_MODEL_SIZE * PanelConfig.teamIndicatorScale).toInt()
-    private val modelSpacing: Int get() = (BASE_MODEL_SPACING * PanelConfig.teamIndicatorScale).toInt()
+    internal val modelSize: Int get() = (BASE_MODEL_SIZE * PanelConfig.teamIndicatorScale).toInt()
+    internal val modelSpacing: Int get() = (BASE_MODEL_SPACING * PanelConfig.teamIndicatorScale).toInt()
 
     // Panel padding (used for bounds calculations; rendering delegated to TeamPanelRenderer)
-    private const val PANEL_PADDING_V = 2
-    private const val PANEL_PADDING_H = 5
+    internal const val PANEL_PADDING_V = 2
+    internal const val PANEL_PADDING_H = 5
 
     private var isMinimised: Boolean = false
 
@@ -888,8 +890,8 @@ object TeamIndicatorUI {
 
             for (candidate in aspectCandidates) {
                 if (candidate.isBlank()) continue
-                val form = species.getForm(setOf(candidate))
-                if (form != species.standardForm || candidate == species.standardForm.aspects.firstOrNull()) {
+                val form = SafeFormResolver.safeGetForm(species, candidate, context = "TeamIndicatorUI.resolvePreviewForm.named")
+                if (form != null && (form != species.standardForm || candidate == species.standardForm.aspects.firstOrNull())) {
                     return form
                 }
             }
@@ -897,8 +899,8 @@ object TeamIndicatorUI {
             return species.standardForm
         }
         if (entry.aspects.isNotEmpty()) {
-            val aspectForm = species.getForm(entry.aspects)
-            if (aspectForm != species.standardForm || entry.aspects == species.standardForm.aspects) {
+            val aspectForm = SafeFormResolver.safeGetForm(species, entry.aspects, context = "TeamIndicatorUI.resolvePreviewForm.aspects")
+            if (aspectForm != null && (aspectForm != species.standardForm || entry.aspects == species.standardForm.aspects)) {
                 return aspectForm
             }
         }
@@ -911,8 +913,8 @@ object TeamIndicatorUI {
 
         for (candidate in aspectCandidates) {
             if (candidate.isBlank()) continue
-            val form = species.getForm(setOf(candidate))
-            if (form != species.standardForm || candidate == species.standardForm.aspects.firstOrNull()) {
+            val form = SafeFormResolver.safeGetForm(species, candidate, context = "TeamIndicatorUI.resolvePreviewForm.fallback")
+            if (form != null && (form != species.standardForm || candidate == species.standardForm.aspects.firstOrNull())) {
                 return form
             }
         }
@@ -986,6 +988,7 @@ object TeamIndicatorUI {
 
         val mc = MinecraftClient.getInstance()
         val screenWidth = mc.window.scaledWidth
+        val screenHeight = mc.window.scaledHeight
 
         // Get mouse position for hover detection
         val mouseX = (mc.mouse.x * mc.window.scaledWidth / mc.window.width).toInt()
@@ -1014,13 +1017,15 @@ object TeamIndicatorUI {
             isLeftSide = true,
             teamSize = leftTeamSize,
             defaultY = leftY,
-            screenWidth = screenWidth
+            screenWidth = screenWidth,
+            screenHeight = screenHeight
         )
         val (rightX, rightFinalY) = getTeamPosition(
             isLeftSide = false,
             teamSize = rightTeamSize,
             defaultY = rightY,
-            screenWidth = screenWidth
+            screenWidth = screenWidth,
+            screenHeight = screenHeight
         )
 
         // Render LEFT side - player's team if they're on left, otherwise tracked
@@ -1118,6 +1123,23 @@ object TeamIndicatorUI {
         return hoveredPokeball != null || isMouseOverTeamPanels()
     }
 
+    internal fun calculateModelPositionFromDrag(
+        dragStartModelCoord: Int,
+        delta: Int,
+        padding: Int,
+        panelSpan: Int,
+        viewportSpan: Int
+    ): Int {
+        if (viewportSpan <= 0) return padding
+        val candidatePanelCoord = dragStartModelCoord.toLong() - padding.toLong() + delta.toLong()
+        val clampedPanelCoord = ResponsiveGeometry.clampCoord(
+            candidate = candidatePanelCoord.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+            widgetSpan = panelSpan,
+            viewportSpan = viewportSpan
+        )
+        return clampedPanelCoord + padding
+    }
+
     /**
      * Handle all input: dragging, clicking, font keybinds.
      */
@@ -1137,8 +1159,13 @@ object TeamIndicatorUI {
                 // Continue dragging - allow positioning to screen edges
                 val deltaX = mouseX - dragStartMouseX
                 val deltaY = mouseY - dragStartMouseY
-                val newX = (dragStartPanelX + deltaX).coerceIn(0, mc.window.scaledWidth - modelSize)
-                val newY = (dragStartPanelY + deltaY).coerceIn(0, mc.window.scaledHeight - modelSize)
+
+                val draggedBounds = if (draggingLeftSide) leftTeamPanelBounds else rightTeamPanelBounds
+                val panelWidth = draggedBounds?.width ?: (modelSize + PANEL_PADDING_H * 2)
+                val panelHeight = draggedBounds?.height ?: (modelSize + PANEL_PADDING_V * 2)
+
+                val newX = calculateModelPositionFromDrag(dragStartPanelX, deltaX, PANEL_PADDING_H, panelWidth, mc.window.scaledWidth)
+                val newY = calculateModelPositionFromDrag(dragStartPanelY, deltaY, PANEL_PADDING_V, panelHeight, mc.window.scaledHeight)
 
                 if (draggingLeftSide) {
                     PanelConfig.setTeamIndicatorLeftPosition(newX, newY)
@@ -1149,10 +1176,12 @@ object TeamIndicatorUI {
                 // Alt+drag: Also move the OTHER panel with mirrored X movement (same Y)
                 // This helps users align both panels symmetrically
                 if (isAltDown) {
-                    // Mirrored X: if we move right (+deltaX), other panel moves left (-deltaX)
-                    // Same Y: both panels move in the same vertical direction
-                    val mirroredX = (dragStartOtherPanelX - deltaX).coerceIn(0, mc.window.scaledWidth - modelSize)
-                    val sameY = (dragStartOtherPanelY + deltaY).coerceIn(0, mc.window.scaledHeight - modelSize)
+                    val otherBounds = if (draggingLeftSide) rightTeamPanelBounds else leftTeamPanelBounds
+                    val otherWidth = otherBounds?.width ?: (modelSize + PANEL_PADDING_H * 2)
+                    val otherHeight = otherBounds?.height ?: (modelSize + PANEL_PADDING_V * 2)
+
+                    val mirroredX = calculateModelPositionFromDrag(dragStartOtherPanelX, -deltaX, PANEL_PADDING_H, otherWidth, mc.window.scaledWidth)
+                    val sameY = calculateModelPositionFromDrag(dragStartOtherPanelY, deltaY, PANEL_PADDING_V, otherHeight, mc.window.scaledHeight)
 
                     if (draggingLeftSide) {
                         PanelConfig.setTeamIndicatorRightPosition(mirroredX, sameY)
@@ -1317,62 +1346,77 @@ object TeamIndicatorUI {
         previouslyActiveUuids[isLeftSide] = currentlyActiveUuids
     }
 
-    private fun calculateIndicatorY(activeCount: Int): Int {
+    internal fun calculateIndicatorY(activeCount: Int): Int {
         if (activeCount <= 0) return VERTICAL_INSET + TILE_HEIGHT + MODEL_OFFSET_Y
 
+        val count = activeCount.coerceIn(0, 100)
         // Cobblemon uses compact mode when there are 3+ active Pokemon on a side
-        val isCompact = activeCount >= 3
+        val isCompact = count >= 3
         val tileHeight = if (isCompact) COMPACT_TILE_HEIGHT else TILE_HEIGHT
 
         // Visual tile stacking - empirically adjusted based on in-game testing
         // Singles/Doubles: tiles are spaced 15px apart
         // Triples+: tiles use compact mode with tighter spacing, but need more total space
         val effectiveSpacing = when {
-            activeCount >= 3 -> 30  // Triple battles need more spacing to clear all tiles
-            else -> 15              // Singles and doubles
+            count >= 3 -> 30  // Triple battles need more spacing to clear all tiles
+            else -> 15        // Singles and doubles
         }
 
-        val bottomOfTiles = VERTICAL_INSET + (activeCount - 1) * effectiveSpacing + tileHeight
+        val bottomOfTiles = VERTICAL_INSET + (count - 1) * effectiveSpacing + tileHeight
 
         return bottomOfTiles + MODEL_OFFSET_Y
     }
 
     /**
      * Get the position for a team indicator panel.
-     * Returns custom position if set, otherwise calculates default based on orientation.
+     * Reconciles candidate positions against the viewport using actual panel bounds,
+     * guarding against extreme saved coordinates while preserving user configuration.
      */
-    private fun getTeamPosition(
+    internal fun getTeamPosition(
         isLeftSide: Boolean,
         teamSize: Int,
         defaultY: Int,
-        screenWidth: Int
+        screenWidth: Int,
+        screenHeight: Int
     ): Pair<Int, Int> {
-        // Check for custom position first
         val customX = if (isLeftSide) PanelConfig.teamIndicatorLeftX else PanelConfig.teamIndicatorRightX
         val customY = if (isLeftSide) PanelConfig.teamIndicatorLeftY else PanelConfig.teamIndicatorRightY
 
-        if (customX != null && customY != null) {
-            return Pair(customX, customY)
-        }
-
-        // Calculate default position based on orientation
         val isVertical = PanelConfig.teamIndicatorOrientation == PanelConfig.TeamIndicatorOrientation.VERTICAL
+        val (panelWidth, panelHeight) = calculatePanelDimensions(teamSize)
 
         val defaultX = if (isLeftSide) {
             HORIZONTAL_INSET
         } else {
             // Right side: align to right edge
             if (isVertical) {
-                // For vertical, panel is narrow (single column)
                 screenWidth - HORIZONTAL_INSET - modelSize
             } else {
-                // For horizontal, calculate full width
                 val teamWidth = teamSize * modelSize + (teamSize - 1) * modelSpacing
                 screenWidth - HORIZONTAL_INSET - teamWidth
             }
         }
 
-        return Pair(customX ?: defaultX, customY ?: defaultY)
+        val candidateX = customX ?: defaultX
+        val candidateY = customY ?: defaultY
+
+        // Reconcile coordinates against screen dimensions using panel bounds
+        // panel starts at (candidateX - PANEL_PADDING_H, candidateY - PANEL_PADDING_V)
+        val candidatePanelX = candidateX.toLong() - PANEL_PADDING_H.toLong()
+        val candidatePanelY = candidateY.toLong() - PANEL_PADDING_V.toLong()
+
+        val clampedPanelX = ResponsiveGeometry.clampCoord(
+            candidate = candidatePanelX.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+            widgetSpan = panelWidth,
+            viewportSpan = screenWidth
+        )
+        val clampedPanelY = ResponsiveGeometry.clampCoord(
+            candidate = candidatePanelY.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+            widgetSpan = panelHeight,
+            viewportSpan = screenHeight
+        )
+
+        return Pair(clampedPanelX + PANEL_PADDING_H, clampedPanelY + PANEL_PADDING_V)
     }
 
     private fun resolveBattlePokemonForm(
@@ -1383,7 +1427,7 @@ object TeamIndicatorUI {
         val liveSpecies = runCatching { battlePokemon.species }.getOrNull()
         val fallbackSpecies = speciesId?.let(PokemonSpecies::getByIdentifier)
         val species = liveSpecies ?: fallbackSpecies ?: return null
-        val battleForm = runCatching { battlePokemon.species.getForm(aspects) }.getOrNull()
+        val battleForm = SafeFormResolver.safeGetForm(species, aspects, context = "TeamIndicatorUI.resolveBattlePokemonForm.battleForm")
         if (species.resourceIdentifier.path.equals("shaymin", ignoreCase = true)) {
             return resolveShayminForm(species, battleForm)
         }
@@ -1392,14 +1436,14 @@ object TeamIndicatorUI {
         if (!namedForm.isNullOrBlank()) {
             return explicitForm ?: species.standardForm
         }
-        return runCatching { species.getForm(aspects) }.getOrNull() ?: explicitForm ?: species.standardForm
+        return SafeFormResolver.safeGetForm(species, aspects, context = "TeamIndicatorUI.resolveBattlePokemonForm.aspectForm") ?: explicitForm ?: species.standardForm
     }
 
     private fun resolveShayminForm(
         species: com.cobblemon.mod.common.pokemon.Species,
         battleForm: FormData?
     ): FormData {
-        val skyForm = runCatching { species.getForm(setOf("sky")) }.getOrNull()
+        val skyForm = SafeFormResolver.safeGetForm(species, "sky", context = "TeamIndicatorUI.resolveShayminForm")
         val battleHasFlying = battleForm?.primaryType?.name == "flying" || battleForm?.secondaryType?.name == "flying"
         return if (battleHasFlying) skyForm ?: species.standardForm else species.standardForm
     }
@@ -1416,8 +1460,8 @@ object TeamIndicatorUI {
             aspectCandidates += candidate.lowercase().replace(" ", "-")
             aspectCandidates += candidate.lowercase().replace(" ", "-").removePrefix(rawSpeciesId.lowercase()).trim('-')
             for (aspect in aspectCandidates) {
-                val form = species.getForm(setOf(aspect))
-                if (form != species.standardForm || aspect == species.standardForm.aspects.firstOrNull()) {
+                val form = SafeFormResolver.safeGetForm(species, aspect, context = "TeamIndicatorUI.resolveExplicitFormData")
+                if (form != null && (form != species.standardForm || aspect == species.standardForm.aspects.firstOrNull())) {
                     return form
                 }
             }
@@ -1555,7 +1599,7 @@ object TeamIndicatorUI {
     private const val HELP_ICON_SIZE = 8
     private const val HELP_ICON_MARGIN = 2
 
-    private fun calculatePanelDimensions(teamSize: Int): Pair<Int, Int> =
+    internal fun calculatePanelDimensions(teamSize: Int): Pair<Int, Int> =
         TeamPanelRenderer.calculatePanelDimensions(teamSize, modelSize, modelSpacing)
 
     private fun drawTeamPanel(context: DrawContext, x: Int, y: Int, teamSize: Int) =
