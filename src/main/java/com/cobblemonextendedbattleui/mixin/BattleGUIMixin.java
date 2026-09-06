@@ -20,7 +20,7 @@ public abstract class BattleGUIMixin {
     @Shadow(remap = false)
     private BattleMessagePane messagePane;
 
-    @Inject(method = "method_25394", at = @At("HEAD"))
+    @Inject(method = {"render", "method_25394"}, at = @At("HEAD"), remap = false)
     private void updateBattleMessagePaneVisibility(DrawContext context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
         if (messagePane != null) {
             messagePane.visible = !PanelConfig.INSTANCE.getEnableBattleLog();

@@ -43,7 +43,7 @@
     "minecraft": "~1.21.1",
     "java": ">=21",
     "fabric-language-kotlin": ">=1.12.0",
-    "cobblemon": ">=1.7.3"
+    "cobblemon": ">=1.8.0"
   },
   "suggests": {
     "modmenu": "*",

@@ -9,6 +9,7 @@
 - Stronger invalidation and form safety: battle snapshots use deterministic length-prefixed fingerprinting across all calculation-relevant fields (stats, weight, items, moves, tera types), and form resolution catches unexpected form exceptions with bounded, rate-limited diagnostics to avoid crashes or log spam.
 - Pure regression test suite: adds comprehensive JUnit tests for viewport bounds reconciliation, layout calculations, snapshot fingerprint collision resistance, coordinator invalidation rules, safe form diagnostic gates, and hardened version comparison.
 - Cross-namespace overlay mixin safety: dual-targets BattleOverlay render across development (named) and production (intermediary) runtimes without refmap dependency, resolving a startup crash during mixin application.
+- Cobblemon 1.8.0 support: built against `cobblemon 1.8.0+1.21.1` and now requires it (`fabric.mod.json` -> `cobblemon >=1.8.0`). Fixes the 1.8.0 startup/battle-entry crash `NoSuchMethodError: PokemonGuiUtilsKt.drawProfilePokemon$default` (1.8.0 replaced the `applyProfileTransform: Boolean` parameter with `profileTransformType: ProfileTransformType` and added a `blockLight: Int` parameter, changing the synthetic `$default` descriptor). Not binary-compatible with Cobblemon 1.7.x. The battle-log `BattleGUIMixin` was also harmonized to the same dual-selector (`{"render", "method_25394"}`, `remap = false`) used by `BattleOverlayMixin`.
 
 ## 0.9.1.6-deltacalc
 
